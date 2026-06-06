@@ -1,0 +1,53 @@
+"""LangGraph graph definition for the AutoMark AI campaign generation pipeline."""
+
+from langgraph.types import Send
+from langgraph.graph import END, StateGraph
+
+from nodes.creative import creative_node
+from nodes.media_buying import media_buying_node
+from nodes.merge import merge_node
+from nodes.orchestrator import orchestrator_node
+from state import CampaignState
+
+
+def route_to_subagents(state: CampaignState):
+    """
+    Fan-out router called after orchestrator_node.
+
+    Uses the Send API so creative_node and media_buying_node run in parallel.
+    If the orchestrator failed (empty plan or errors), short-circuit to merge_node
+    so the error surfaces cleanly without attempting sub-agents.
+    """
+    if not state.get("campaign_plan") or (
+        state.get("errors") and not state.get("campaign_plan")
+    ):
+        return "merge_node"
+
+    return [
+        Send("creative_node", dict(state)),
+        Send("media_buying_node", dict(state)),
+    ]
+
+
+def get_graph():
+    """Build and compile the campaign generation graph. Safe to import without side effects."""
+    builder = StateGraph(CampaignState)
+
+    builder.add_node("orchestrator_node", orchestrator_node)
+    builder.add_node("creative_node", creative_node)
+    builder.add_node("media_buying_node", media_buying_node)
+    builder.add_node("merge_node", merge_node)
+
+    builder.set_entry_point("orchestrator_node")
+
+    builder.add_conditional_edges(
+        "orchestrator_node",
+        route_to_subagents,
+        ["creative_node", "media_buying_node", "merge_node"],
+    )
+
+    builder.add_edge("creative_node", "merge_node")
+    builder.add_edge("media_buying_node", "merge_node")
+    builder.add_edge("merge_node", END)
+
+    return builder.compile()
