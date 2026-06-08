@@ -25,9 +25,9 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.5-flash"
 GROQ_MODEL = "llama-3.3-70b-versatile"
-IMAGEN_MODEL = "imagen-3.0-generate-002"
+IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
