@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -72,6 +73,8 @@ def _init():
         "interrupt_data": {},
         "image_path": None,
         "final_state": None,
+        "meta_publish_result": None,
+        "meta_publish_error": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -220,6 +223,165 @@ def _stage_text_review():
         st.rerun()
 
 
+def _render_ad_preview(bundle: dict):
+    """Render a styled mock ad preview card for Facebook and Instagram."""
+    creative = bundle.get("creative", {})
+    product = bundle.get("product", {})
+    campaign = bundle.get("campaign", {})
+
+    page_name = f"AutoMark — {product.get('type', 'Brand')}"
+    copies = creative.get("copies", [""])
+    headlines = creative.get("headlines", [""])
+    cta_label = creative.get("cta", "Learn More")
+    copy_text = copies[0] if copies else ""
+    headline_text = headlines[0] if headlines else ""
+
+    # Resolve preview image: use uploaded file if available, else first generated image
+    preview_img_html = ""
+    image_path = st.session_state.get("image_path")
+    gen_images = creative.get("generated_images", [])
+
+    if image_path and os.path.exists(image_path):
+        try:
+            with open(image_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            ext = Path(image_path).suffix.lstrip(".") or "jpeg"
+            preview_img_html = (
+                f'<img src="data:image/{ext};base64,{b64}" '
+                f'style="width:100%;border-radius:4px;display:block;margin:10px 0;">'
+            )
+        except Exception:
+            pass
+
+    if not preview_img_html and gen_images:
+        try:
+            preview_img_html = (
+                f'<img src="data:image/png;base64,{gen_images[0]}" '
+                f'style="width:100%;border-radius:4px;display:block;margin:10px 0;">'
+            )
+        except Exception:
+            pass
+
+    if not preview_img_html:
+        preview_img_html = (
+            '<div style="width:100%;height:180px;background:#e4e6ea;border-radius:4px;'
+            'display:flex;align-items:center;justify-content:center;'
+            'color:#65676b;font-size:14px;margin:10px 0;">No image available</div>'
+        )
+
+    card_css = """
+    <style>
+    .ad-card {
+        border:1px solid #dddfe2; border-radius:8px; padding:12px 16px;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+        max-width:420px; background:#fff;
+    }
+    .ad-card .header { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .ad-card .avatar {
+        width:40px; height:40px; border-radius:50%; background:#1877f2;
+        display:flex; align-items:center; justify-content:center;
+        color:#fff; font-weight:700; font-size:16px; flex-shrink:0;
+    }
+    .ad-card .page-name { font-weight:600; font-size:14px; color:#050505; }
+    .ad-card .sponsored { font-size:12px; color:#65676b; }
+    .ad-card .copy-text { font-size:14px; color:#050505; margin-bottom:4px; line-height:1.5; }
+    .ad-card .ad-footer {
+        background:#f0f2f5; border-top:1px solid #dddfe2; margin:8px -16px -12px;
+        padding:10px 16px; border-radius:0 0 8px 8px;
+        display:flex; justify-content:space-between; align-items:center;
+    }
+    .ad-card .headline { font-weight:600; font-size:14px; color:#050505; }
+    .ad-card .cta-btn {
+        background:#e7e9eb; border:1px solid #ccd0d5; border-radius:6px;
+        padding:6px 12px; font-size:14px; font-weight:600; color:#050505;
+        white-space:nowrap;
+    }
+    </style>
+    """
+
+    initial = (page_name[0] if page_name else "A").upper()
+    card_html = f"""
+    {card_css}
+    <div class="ad-card">
+      <div class="header">
+        <div class="avatar">{initial}</div>
+        <div>
+          <div class="page-name">{page_name}</div>
+          <div class="sponsored">Sponsored · <span style="color:#1877f2">&#9679;</span></div>
+        </div>
+      </div>
+      <div class="copy-text">{copy_text[:200]}</div>
+      {preview_img_html}
+      <div class="ad-footer">
+        <div>
+          <div class="headline">{headline_text[:40]}</div>
+        </div>
+        <div class="cta-btn">{cta_label}</div>
+      </div>
+    </div>
+    """
+
+    # Instagram preview (slightly different styling)
+    ig_card_html = f"""
+    <div class="ad-card" style="border-radius:0;border:1px solid #dbdbdb;">
+      <div class="header">
+        <div class="avatar" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);">{initial}</div>
+        <div>
+          <div class="page-name" style="font-size:13px;">{page_name}</div>
+          <div class="sponsored" style="font-size:11px;">Sponsored</div>
+        </div>
+      </div>
+      {preview_img_html}
+      <div style="padding:8px 0;">
+        <div style="font-size:13px;color:#262626;margin-bottom:4px;">
+          <b>{page_name}</b> {copy_text[:150]}
+        </div>
+        <div style="font-size:12px;color:#8e8e8e;margin-bottom:8px;">{headline_text}</div>
+        <div style="background:#e0e0e0;border-radius:4px;padding:8px;text-align:center;
+             font-size:13px;font-weight:600;color:#262626;">{cta_label}</div>
+      </div>
+    </div>
+    """
+
+    st.subheader("Ad Preview")
+    tab_fb, tab_ig = st.tabs(["Facebook", "Instagram"])
+    with tab_fb:
+        col, _ = st.columns([1, 1])
+        with col:
+            st.markdown(card_html, unsafe_allow_html=True)
+    with tab_ig:
+        col, _ = st.columns([1, 1])
+        with col:
+            st.markdown(ig_card_html, unsafe_allow_html=True)
+
+
+def _do_publish(bundle: dict):
+    """Run the full Meta publish sequence and store result in session_state."""
+    from meta_client import get_meta_client
+
+    client = get_meta_client()
+    try:
+        with st.spinner("Creating campaign on Meta…"):
+            campaign = client.create_campaign(bundle)
+        with st.spinner("Creating ad set…"):
+            ad_set = client.create_ad_set(bundle, campaign["id"])
+        with st.spinner("Creating ad creative…"):
+            creative = client.create_ad_creative(bundle)
+        with st.spinner("Creating ad…"):
+            ad = client.create_ad(bundle, ad_set["id"], creative["id"])
+
+        st.session_state["meta_publish_result"] = {
+            "campaign": campaign,
+            "ad_set": ad_set,
+            "creative": creative,
+            "ad": ad,
+        }
+        st.session_state["meta_publish_error"] = None
+    except Exception as e:
+        st.session_state["meta_publish_error"] = str(e)
+        st.session_state["meta_publish_result"] = None
+
+
 def _stage_done():
     st.header("Campaign Bundle Ready")
 
@@ -281,6 +443,11 @@ def _stage_done():
 
     st.divider()
 
+    # --- Ad Preview Card ---
+    _render_ad_preview(bundle)
+
+    st.divider()
+
     # --- Download ---
     bundle_for_download = dict(bundle)
     creative_copy = dict(bundle_for_download.get("creative", {}))
@@ -294,8 +461,51 @@ def _stage_done():
         mime="application/json",
     )
 
+    st.divider()
+
+    # --- Publish to Meta ---
+    st.subheader("Publish to Meta")
+
+    publish_result = st.session_state.get("meta_publish_result")
+    publish_error = st.session_state.get("meta_publish_error")
+
+    if publish_result:
+        is_sim = os.getenv("META_SIMULATION_MODE", "true").lower() == "true"
+        mode_tag = " *(simulated)*" if is_sim else ""
+        st.success(f"Campaign published successfully{mode_tag}!")
+
+        r = publish_result
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Campaign ID", r["campaign"]["id"])
+            st.metric("Campaign Status", r["campaign"]["status"])
+            st.metric("Ad Set ID", r["ad_set"]["id"])
+        with col2:
+            st.metric("Creative ID", r["creative"]["id"])
+            st.metric("Ad ID", r["ad"]["id"])
+            st.metric("Ad Status", r["ad"]["status"])
+
+        with st.expander("Full publish response"):
+            st.json(publish_result)
+
+    elif publish_error:
+        st.error(f"Publish failed: {publish_error}")
+        if st.button("Retry Publish"):
+            st.session_state["meta_publish_error"] = None
+            _do_publish(bundle)
+            st.rerun()
+    else:
+        if st.button("Publish Campaign to Meta", type="primary"):
+            _do_publish(bundle)
+            st.rerun()
+
+    st.divider()
+
     if st.button("Start New Campaign"):
-        for key in ["thread_id", "ui_stage", "interrupt_data", "image_path", "final_state"]:
+        for key in [
+            "thread_id", "ui_stage", "interrupt_data", "image_path", "final_state",
+            "meta_publish_result", "meta_publish_error",
+        ]:
             st.session_state.pop(key, None)
         st.rerun()
 
@@ -352,6 +562,14 @@ def main():
 
     _init()
     _sidebar()
+
+    # Simulation mode banner — visible on every page
+    if os.getenv("META_SIMULATION_MODE", "true").lower() == "true":
+        st.info(
+            "🟡 **Running in demo mode** — connect Meta credentials in `.env` "
+            "and set `META_SIMULATION_MODE=false` to go live.",
+            icon="ℹ️",
+        )
 
     stage = st.session_state["ui_stage"]
 
