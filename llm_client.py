@@ -25,7 +25,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-3.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 GROQ_MODEL = "llama-3.3-70b-versatile"
 IMAGEN_MODEL = "imagen-4.0-fast-generate-001"
 
@@ -61,24 +61,18 @@ def call_llm(
     allow_fallback: bool = True,
 ) -> tuple[str, str]:
     """
-    Call Gemini for text generation, falling back to Groq on rate limit or service errors.
-
-    Returns:
-        (response_text, provider_used) where provider_used is "gemini" or "groq".
-    Raises:
-        RuntimeError if both providers fail.
+    Call primary LLM for text generation, falling back to secondary on errors.
+    Primary is controlled by PRIMARY_TEXT_LLM env var (gemini or groq).
     """
-    try:
+    primary = os.getenv("PRIMARY_TEXT_LLM", "gemini").lower()
+
+    def try_gemini():
         model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=system_prompt)
         response = model.generate_content(prompt)
         logger.info("node=%s provider=gemini", node_name)
         return response.text, "gemini"
-    except (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable) as e:
-        if not allow_fallback:
-            raise RuntimeError(f"Gemini failed and fallback disabled: {e}") from e
-        logger.warning("node=%s Gemini error %s — falling back to Groq", node_name, type(e).__name__)
 
-    try:
+    def try_groq():
         resp = _groq_client.chat.completions.create(
             model=GROQ_MODEL,
             messages=[
@@ -86,10 +80,31 @@ def call_llm(
                 {"role": "user", "content": prompt},
             ],
         )
-        logger.info("node=%s provider=groq (fallback)", node_name)
+        logger.info("node=%s provider=groq", node_name)
         return resp.choices[0].message.content, "groq"
-    except Exception as e:
-        raise RuntimeError(f"Both Gemini and Groq failed for node {node_name}: {e}") from e
+
+    if primary == "groq":
+        try:
+            return try_groq()
+        except Exception as e:
+            if not allow_fallback:
+                raise RuntimeError(f"Groq failed and fallback disabled: {e}") from e
+            logger.warning("node=%s Groq error %s — falling back to Gemini", node_name, type(e).__name__)
+            try:
+                return try_gemini()
+            except Exception as e2:
+                raise RuntimeError(f"Both Groq and Gemini failed for node {node_name}: {e2}") from e2
+    else:
+        try:
+            return try_gemini()
+        except (google_exceptions.ResourceExhausted, google_exceptions.ServiceUnavailable) as e:
+            if not allow_fallback:
+                raise RuntimeError(f"Gemini failed and fallback disabled: {e}") from e
+            logger.warning("node=%s Gemini error %s — falling back to Groq", node_name, type(e).__name__)
+            try:
+                return try_groq()
+            except Exception as e2:
+                raise RuntimeError(f"Both Gemini and Groq failed for node {node_name}: {e2}") from e2
 
 
 def call_llm_vision(image_path: str, prompt: str, system_prompt: str) -> str:
@@ -108,7 +123,7 @@ def call_llm_vision(image_path: str, prompt: str, system_prompt: str) -> str:
 
 def generate_ad_images(prompt: str, n: int = 3) -> list[str]:
     """
-    Generate n ad images using Imagen 3 via the google-genai SDK.
+    Generate n ad images using Imagen 4 via the google-genai SDK.
 
     Args:
         prompt: Detailed visual description for the image generation model.

@@ -1,6 +1,7 @@
 """Review node — human-in-the-loop approval for generated images and ad copy."""
 
 import logging
+import os
 
 from langgraph.types import interrupt
 
@@ -8,16 +9,25 @@ from llm_client import generate_ad_images
 
 logger = logging.getLogger(__name__)
 
+# Read configurable regeneration limit from environment
+MAX_REGENERATIONS_ALLOWED = int(os.getenv("MAX_REGENERATIONS_ALLOWED", "2"))
+
 
 def review_node(state: dict) -> dict:
     """
     Two-phase human review using LangGraph interrupt().
 
-    Phase 1 — Image review (loops until all 3 images are approved):
-        Interrupt payload: {"stage": "image_review", "images": [b64, b64, b64]}
-        Resume payload:    {"approved": [bool, bool, bool], "feedback": {int|str: str}}
-        Rejected images are regenerated individually with per-image feedback,
-        then re-presented until the user approves all of them.
+    Phase 1 — Image review (loops until approved or max regenerations exceeded):
+        Interrupt payload: {"stage": "image_review", "images": [...],
+                            "regen_count": int, "max_regens": int}
+        Resume payload:    {"approved": [bool, ...], "feedback": {int|str: str}}
+
+        If user rejects and regen_count < MAX_REGENERATIONS_ALLOWED:
+            Regenerate rejected images, increment counter, loop.
+        If user rejects and regen_count >= MAX_REGENERATIONS_ALLOWED:
+            Interrupt with stage "max_regenerations_exceeded" showing all
+            previously generated images. User picks one or is told to wait 5h.
+            Resume payload: {"chosen_index": int}
 
     Phase 2 — Text review (single interrupt):
         Interrupt payload: {"stage": "text_review",
@@ -34,11 +44,20 @@ def review_node(state: dict) -> dict:
     images: list[str] = list(creative.get("generated_images") or [])
     visual_prompt: str = creative.get("visual_prompt", "")
 
+    # Track all images ever generated so user can pick from history
+    image_history: list[str] = list(images)  # flat list of every image generated
+    regen_count = 0
+
     # ------------------------------------------------------------------ #
-    # Phase 1: Image review — loop until all images are approved           #
+    # Phase 1: Image review — loop until approved or max regens exceeded   #
     # ------------------------------------------------------------------ #
     while True:
-        result = interrupt({"stage": "image_review", "images": images})
+        result = interrupt({
+            "stage": "image_review",
+            "images": images,
+            "regen_count": regen_count,
+            "max_regens": MAX_REGENERATIONS_ALLOWED,
+        })
 
         approved_list: list[bool] = result.get("approved", [True] * len(images))
         img_feedback: dict = result.get("feedback", {})
@@ -46,7 +65,25 @@ def review_node(state: dict) -> dict:
         if all(approved_list):
             break
 
-        # Regenerate only rejected images, one at a time
+        # Check if we've hit the regeneration limit
+        if regen_count >= MAX_REGENERATIONS_ALLOWED:
+            # Send all previously generated images for the user to pick from
+            pick_result = interrupt({
+                "stage": "max_regenerations_exceeded",
+                "image_history": image_history,
+                "message": (
+                    f"Maximum regenerations ({MAX_REGENERATIONS_ALLOWED}) exceeded. "
+                    "You can choose one of the previously generated images below, "
+                    "or try again after 5 hours."
+                ),
+            })
+            chosen_index = pick_result.get("chosen_index", 0)
+            # Clamp to valid range
+            chosen_index = max(0, min(chosen_index, len(image_history) - 1))
+            images = [image_history[chosen_index]]
+            break
+
+        # Regenerate rejected images, one at a time
         for idx, approved in enumerate(approved_list):
             if not approved:
                 # Accept both int and str keys from the frontend
@@ -58,10 +95,14 @@ def review_node(state: dict) -> dict:
                     new_images = generate_ad_images(regen_prompt, n=1)
                     if new_images and idx < len(images):
                         images[idx] = new_images[0]
+                        # Add to history for later fallback selection
+                        image_history.append(new_images[0])
                         logger.info("review_node: regenerated image %d", idx)
                 except RuntimeError as e:
                     logger.warning("review_node: regen failed for image %d: %s", idx, e)
                     # Keep the old image — user can reject and retry
+
+        regen_count += 1
 
     # Commit approved (and any regenerated) images back to creative_output
     creative["generated_images"] = images

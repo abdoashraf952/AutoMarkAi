@@ -142,10 +142,18 @@ def _stage_questions():
 
 
 def _stage_image_review():
-    st.header("Review Generated Images")
-    st.write("Approve each image or provide feedback for regeneration.")
+    st.header("Review Generated Image")
 
-    images: list[str] = st.session_state["interrupt_data"].get("images", [])
+    data = st.session_state["interrupt_data"]
+    images: list[str] = data.get("images", [])
+    regen_count: int = data.get("regen_count", 0)
+    max_regens: int = data.get("max_regens", 2)
+
+    remaining = max_regens - regen_count
+    if regen_count > 0:
+        st.info(f"🔄 Regeneration {regen_count} of {max_regens} used. {remaining} remaining.")
+    else:
+        st.write("Review the generated ad image. Approve it or request a regeneration.")
 
     approved_list: list[bool] = []
     feedback_dict: dict = {}
@@ -158,24 +166,44 @@ def _stage_image_review():
             st.rerun()
         return
 
-    cols = st.columns(len(images))
-    for idx, (col, b64_img) in enumerate(zip(cols, images)):
-        with col:
+    # Display images — single image gets more space, multiple use columns
+    if len(images) == 1:
+        col_img, _ = st.columns([2, 1])
+        with col_img:
             try:
-                st.image(base64.b64decode(b64_img), caption=f"Image {idx + 1}", use_container_width=True)
+                st.image(base64.b64decode(images[0]), caption="Generated Ad Image", use_container_width=True)
             except Exception:
-                st.error(f"Could not display image {idx + 1}")
-            approved = st.checkbox(f"Approve Image {idx + 1}", key=f"img_ok_{idx}", value=True)
+                st.error("Could not display image")
+            approved = st.checkbox("Approve this image", key="img_ok_0", value=True)
             approved_list.append(approved)
             if not approved:
                 fb = st.text_area(
-                    f"Feedback for Image {idx + 1}",
-                    key=f"img_fb_{idx}",
+                    "What should be changed?",
+                    key="img_fb_0",
                     height=80,
                     placeholder="Describe what to change…",
                 )
                 if fb.strip():
-                    feedback_dict[idx] = fb.strip()
+                    feedback_dict[0] = fb.strip()
+    else:
+        cols = st.columns(len(images))
+        for idx, (col, b64_img) in enumerate(zip(cols, images)):
+            with col:
+                try:
+                    st.image(base64.b64decode(b64_img), caption=f"Image {idx + 1}", use_container_width=True)
+                except Exception:
+                    st.error(f"Could not display image {idx + 1}")
+                approved = st.checkbox(f"Approve Image {idx + 1}", key=f"img_ok_{idx}", value=True)
+                approved_list.append(approved)
+                if not approved:
+                    fb = st.text_area(
+                        f"Feedback for Image {idx + 1}",
+                        key=f"img_fb_{idx}",
+                        height=80,
+                        placeholder="Describe what to change…",
+                    )
+                    if fb.strip():
+                        feedback_dict[idx] = fb.strip()
 
     if st.button("Submit Image Review"):
         from langgraph.types import Command
@@ -185,6 +213,40 @@ def _stage_image_review():
             )
         _set_interrupt(interrupt_obj)
         st.rerun()
+
+
+def _stage_max_regen_exceeded():
+    """Stage shown when the user has exhausted all image regeneration attempts."""
+    st.header("Maximum Regenerations Exceeded")
+
+    data = st.session_state["interrupt_data"]
+    message: str = data.get("message", "Maximum regenerations exceeded.")
+    image_history: list[str] = data.get("image_history", [])
+
+    st.warning(message)
+
+    if not image_history:
+        st.error("No images available to choose from.")
+        return
+
+    st.write("Choose one of the previously generated images to use for your campaign:")
+
+    # Show all history images in a grid (max 3 per row)
+    cols_per_row = min(len(image_history), 3)
+    cols = st.columns(cols_per_row)
+    for idx, b64_img in enumerate(image_history):
+        col = cols[idx % cols_per_row]
+        with col:
+            try:
+                st.image(base64.b64decode(b64_img), caption=f"Image {idx + 1}", use_container_width=True)
+            except Exception:
+                st.error(f"Could not display image {idx + 1}")
+            if st.button(f"Choose Image {idx + 1}", key=f"pick_{idx}"):
+                from langgraph.types import Command
+                with st.spinner("Applying selection…"):
+                    interrupt_obj = _advance(Command(resume={"chosen_index": idx}))
+                _set_interrupt(interrupt_obj)
+                st.rerun()
 
 
 def _stage_text_review():
@@ -356,30 +418,67 @@ def _render_ad_preview(bundle: dict):
 
 
 def _do_publish(bundle: dict):
-    """Run the full Meta publish sequence and store result in session_state."""
+    """Run the Meta publish sequence based on env configuration.
+
+    Simulation mode: always simulates both sponsored ad and organic post.
+    Real mode: checks MAKE_SPONSORED_PAUSED_AD and MAKE_ORGANIC_POST flags.
+    """
     from meta_client import get_meta_client
 
-    client = get_meta_client()
-    try:
-        with st.spinner("Creating campaign on Meta…"):
-            campaign = client.create_campaign(bundle)
-        with st.spinner("Creating ad set…"):
-            ad_set = client.create_ad_set(bundle, campaign["id"])
-        with st.spinner("Creating ad creative…"):
-            creative = client.create_ad_creative(bundle)
-        with st.spinner("Creating ad…"):
-            ad = client.create_ad(bundle, ad_set["id"], creative["id"])
+    # Reload .env so changes take effect without restarting Streamlit
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
 
-        st.session_state["meta_publish_result"] = {
-            "campaign": campaign,
-            "ad_set": ad_set,
-            "creative": creative,
-            "ad": ad,
-        }
-        st.session_state["meta_publish_error"] = None
-    except Exception as e:
-        st.session_state["meta_publish_error"] = str(e)
+    client = get_meta_client()
+    simulation_mode = os.getenv("META_SIMULATION_MODE", "true").strip().lower() == "true"
+
+    # In simulation mode: always simulate both ad + post
+    # In real mode: check MAKE_SPONSORED_PAUSED_AD and MAKE_ORGANIC_POST flags
+    make_ad = True if simulation_mode else os.getenv("MAKE_SPONSORED_PAUSED_AD", "1").strip() == "1"
+    make_post = True if simulation_mode else os.getenv("MAKE_ORGANIC_POST", "1").strip() == "1"
+
+    if not make_ad and not make_post:
         st.session_state["meta_publish_result"] = None
+        st.session_state["meta_publish_error"] = (
+            "No publish actions configured "
+            "(both MAKE_SPONSORED_PAUSED_AD and MAKE_ORGANIC_POST are disabled)."
+        )
+        return
+
+    result = {}
+    errors = []
+
+    if make_ad:
+        try:
+            with st.spinner("Creating campaign on Meta…"):
+                campaign = client.create_campaign(bundle)
+            with st.spinner("Creating ad set…"):
+                ad_set = client.create_ad_set(bundle, campaign["id"])
+            with st.spinner("Creating ad creative…"):
+                creative = client.create_ad_creative(bundle)
+            with st.spinner("Creating ad…"):
+                ad = client.create_ad(bundle, ad_set["id"], creative["id"])
+            result["campaign"] = campaign
+            result["ad_set"] = ad_set
+            result["creative"] = creative
+            result["ad"] = ad
+        except Exception as e:
+            errors.append(f"Ad Creation Failed: {e}")
+
+    if make_post:
+        try:
+            with st.spinner("Publishing organic page post…"):
+                post = client.publish_post(bundle)
+            result["post"] = post
+        except Exception as e:
+            errors.append(f"Organic Post Failed: {e}")
+
+    if result:
+        st.session_state["meta_publish_result"] = result
+        st.session_state["meta_publish_error"] = "\n\n".join(errors) if errors else None
+    else:
+        st.session_state["meta_publish_result"] = None
+        st.session_state["meta_publish_error"] = "\n\n".join(errors) if errors else "Unknown error."
 
 
 def _stage_done():
@@ -472,30 +571,44 @@ def _stage_done():
     if publish_result:
         is_sim = os.getenv("META_SIMULATION_MODE", "true").lower() == "true"
         mode_tag = " *(simulated)*" if is_sim else ""
-        st.success(f"Campaign published successfully{mode_tag}!")
+        st.success(f"Published successfully{mode_tag}!")
 
         r = publish_result
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Campaign ID", r["campaign"]["id"])
-            st.metric("Campaign Status", r["campaign"]["status"])
-            st.metric("Ad Set ID", r["ad_set"]["id"])
-        with col2:
-            st.metric("Creative ID", r["creative"]["id"])
-            st.metric("Ad ID", r["ad"]["id"])
-            st.metric("Ad Status", r["ad"]["status"])
+
+        # --- Sponsored Ad Results ---
+        if "campaign" in r:
+            st.markdown("#### 📢 Sponsored Ad (Paused)")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Campaign ID", r["campaign"]["id"])
+                st.metric("Campaign Status", r["campaign"]["status"])
+                st.metric("Ad Set ID", r["ad_set"]["id"])
+            with col2:
+                st.metric("Creative ID", r["creative"]["id"])
+                st.metric("Ad ID", r["ad"]["id"])
+                st.metric("Ad Status", r["ad"]["status"])
+
+        # --- Organic Post Results ---
+        if "post" in r:
+            st.markdown("#### 📝 Organic Page Post")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Post ID", r["post"]["id"])
+            with col2:
+                st.metric("Created", r["post"].get("created_time", "N/A"))
+            if r["post"].get("message"):
+                with st.expander("Post message"):
+                    st.write(r["post"]["message"])
 
         with st.expander("Full publish response"):
             st.json(publish_result)
 
-    elif publish_error:
-        st.error(f"Publish failed: {publish_error}")
-        if st.button("Retry Publish"):
+    if publish_error:
+        st.error(f"Publish issues encountered:\n\n{publish_error}")
+        
+    if publish_error or not publish_result:
+        if st.button("Retry Publish" if publish_error else "Publish Campaign to Meta", type="primary"):
             st.session_state["meta_publish_error"] = None
-            _do_publish(bundle)
-            st.rerun()
-    else:
-        if st.button("Publish Campaign to Meta", type="primary"):
             _do_publish(bundle)
             st.rerun()
 
@@ -514,11 +627,12 @@ def _stage_done():
 # Progress sidebar                                                     #
 # ------------------------------------------------------------------ #
 
-_STAGES = ["setup", "questions", "image_review", "text_review", "done"]
+_STAGES = ["setup", "questions", "image_review", "max_regenerations_exceeded", "text_review", "done"]
 _STAGE_LABELS = {
     "setup": "1. Setup",
     "questions": "2. Product Questions",
     "image_review": "3. Image Review",
+    "max_regenerations_exceeded": "3b. Choose Image",
     "text_review": "4. Copy Review",
     "done": "5. Complete",
 }
@@ -579,6 +693,8 @@ def main():
         _stage_questions()
     elif stage == "image_review":
         _stage_image_review()
+    elif stage == "max_regenerations_exceeded":
+        _stage_max_regen_exceeded()
     elif stage == "text_review":
         _stage_text_review()
     elif stage == "done":
