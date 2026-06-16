@@ -12,6 +12,7 @@ def _merge_dicts(a: dict, b: dict) -> dict:
 class CampaignState(TypedDict, total=False):
     # --- inputs (set at START) ---
     image_path: str
+    image_mode: str   # "use_original" | "enhance_with_ai"
     budget: float
     goal: str
 

@@ -91,6 +91,17 @@ def _stage_setup():
     uploaded = st.file_uploader(
         "Upload product image", type=["jpg", "jpeg", "png", "webp"]
     )
+    image_mode_label = st.radio(
+        "Image option",
+        options=["Use my original photo", "Enhance with AI"],
+        help=(
+            "**Use my original photo** — your uploaded image is used directly as the ad image.\n\n"
+            "**Enhance with AI** — Gemini Imagen edits your photo to make it more ad-ready "
+            "(uses Gemini credits)."
+        ),
+    )
+    image_mode = "use_original" if image_mode_label == "Use my original photo" else "enhance_with_ai"
+
     budget = st.number_input("Budget (USD)", min_value=1.0, value=500.0, step=50.0)
     goal = st.text_input(
         "Campaign goal",
@@ -107,6 +118,7 @@ def _stage_setup():
 
         initial_state = {
             "image_path": image_path,
+            "image_mode": image_mode,
             "budget": float(budget),
             "goal": goal,
             "errors": [],
@@ -142,49 +154,55 @@ def _stage_questions():
 
 
 def _stage_image_review():
-    st.header("Review Generated Image")
-
     data = st.session_state["interrupt_data"]
     images: list[str] = data.get("images", [])
     regen_count: int = data.get("regen_count", 0)
     max_regens: int = data.get("max_regens", 2)
+    can_regenerate: bool = data.get("can_regenerate", True)
 
-    remaining = max_regens - regen_count
-    if regen_count > 0:
-        st.info(f"🔄 Regeneration {regen_count} of {max_regens} used. {remaining} remaining.")
+    if can_regenerate:
+        st.header("Review Enhanced Ad Image")
+        remaining = max_regens - regen_count
+        if regen_count > 0:
+            st.info(f"Re-enhancement {regen_count} of {max_regens} used. {remaining} remaining.")
+        else:
+            st.write("Review the AI-enhanced ad image. Approve it or request a re-enhancement.")
     else:
-        st.write("Review the generated ad image. Approve it or request a regeneration.")
-
-    approved_list: list[bool] = []
-    feedback_dict: dict = {}
+        st.header("Review Your Photo")
+        st.write("Confirm your uploaded photo looks correct before we continue.")
 
     if not images:
-        st.warning("No images were generated (image generation may have failed or quota exceeded).")
+        st.warning("No image available (upload may have failed).")
         if st.button("Skip to Text Review"):
             from langgraph.types import Command
             _set_interrupt(_advance(Command(resume={"approved": [], "feedback": {}})))
             st.rerun()
         return
 
+    approved_list: list[bool] = []
+    feedback_dict: dict = {}
+
     # Display images — single image gets more space, multiple use columns
     if len(images) == 1:
         col_img, _ = st.columns([2, 1])
         with col_img:
             try:
-                st.image(base64.b64decode(images[0]), caption="Generated Ad Image", use_container_width=True)
+                caption = "Your Photo" if not can_regenerate else "Enhanced Ad Image"
+                st.image(base64.b64decode(images[0]), caption=caption, use_container_width=True)
             except Exception:
                 st.error("Could not display image")
-            approved = st.checkbox("Approve this image", key="img_ok_0", value=True)
-            approved_list.append(approved)
-            if not approved:
-                fb = st.text_area(
-                    "What should be changed?",
-                    key="img_fb_0",
-                    height=80,
-                    placeholder="Describe what to change…",
-                )
-                if fb.strip():
-                    feedback_dict[0] = fb.strip()
+            if can_regenerate:
+                approved = st.checkbox("Approve this image", key="img_ok_0", value=True)
+                approved_list.append(approved)
+                if not approved:
+                    fb = st.text_area(
+                        "What should be changed?",
+                        key="img_fb_0",
+                        height=80,
+                        placeholder="Describe what to change…",
+                    )
+                    if fb.strip():
+                        feedback_dict[0] = fb.strip()
     else:
         cols = st.columns(len(images))
         for idx, (col, b64_img) in enumerate(zip(cols, images)):
@@ -193,24 +211,29 @@ def _stage_image_review():
                     st.image(base64.b64decode(b64_img), caption=f"Image {idx + 1}", use_container_width=True)
                 except Exception:
                     st.error(f"Could not display image {idx + 1}")
-                approved = st.checkbox(f"Approve Image {idx + 1}", key=f"img_ok_{idx}", value=True)
-                approved_list.append(approved)
-                if not approved:
-                    fb = st.text_area(
-                        f"Feedback for Image {idx + 1}",
-                        key=f"img_fb_{idx}",
-                        height=80,
-                        placeholder="Describe what to change…",
-                    )
-                    if fb.strip():
-                        feedback_dict[idx] = fb.strip()
+                if can_regenerate:
+                    approved = st.checkbox(f"Approve Image {idx + 1}", key=f"img_ok_{idx}", value=True)
+                    approved_list.append(approved)
+                    if not approved:
+                        fb = st.text_area(
+                            f"Feedback for Image {idx + 1}",
+                            key=f"img_fb_{idx}",
+                            height=80,
+                            placeholder="Describe what to change…",
+                        )
+                        if fb.strip():
+                            feedback_dict[idx] = fb.strip()
 
-    if st.button("Submit Image Review"):
+    btn_label = "Confirm Photo & Continue" if not can_regenerate else "Submit Image Review"
+    if st.button(btn_label):
         from langgraph.types import Command
-        with st.spinner("Processing image review…"):
-            interrupt_obj = _advance(
-                Command(resume={"approved": approved_list, "feedback": feedback_dict})
+        with st.spinner("Processing…"):
+            resume_payload = (
+                {"approved": [True] * max(len(images), 1), "feedback": {}}
+                if not can_regenerate
+                else {"approved": approved_list, "feedback": feedback_dict}
             )
+            interrupt_obj = _advance(Command(resume=resume_payload))
         _set_interrupt(interrupt_obj)
         st.rerun()
 

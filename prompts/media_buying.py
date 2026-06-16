@@ -12,10 +12,12 @@ SYSTEM = (
     '    "age_max": <number>,\n'
     '    "genders": ["all"],\n'
     '    "interests": ["<interest1>", "<interest2>", "<interest3>"],\n'
+    '    "locations": ["<ISO-3166-1-alpha-2 country code>"],\n'
     '    "income_tier": "<tier>"\n'
     "  },\n"
     '  "placement": ["feed", "stories"],\n'
-    '  "bid_strategy": "<strategy>",\n'
+    '  "bid_strategy": "<LOWEST_COST_WITHOUT_CAP|COST_CAP|LOWEST_COST_WITH_BID_CAP>",\n'
+    '  "bid_amount_usd": <number or null>,\n'
     '  "optimization_goal": "<goal>",\n'
     '  "estimated_reach": {"min": <number>, "max": <number>},\n'
     '  "reasoning": "<explanation>"\n'
@@ -26,7 +28,8 @@ SYSTEM = (
     "- If platform is 'instagram', set instagram=1.0 and facebook=0.0\n"
     "- If platform is 'facebook', set instagram=0.0 and facebook=1.0\n"
     "- If platform is 'both', split based on product type (luxury/lifestyle: 70/30, general: 50/50)\n"
-    "- bid_strategy: use LOWEST_COST for budgets under $200, COST_CAP for $200-$1000, BID_CAP above $1000\n"
+    "- bid_strategy: use LOWEST_COST_WITHOUT_CAP for budgets under $200, COST_CAP for $200-$1000, LOWEST_COST_WITH_BID_CAP above $1000\n"
+    "- bid_amount_usd: required when bid_strategy is COST_CAP or LOWEST_COST_WITH_BID_CAP (set to ~20% of daily_budget_usd); null for LOWEST_COST_WITHOUT_CAP\n"
     "- optimization_goal must match campaign objective\n"
     "- interests must be specific and Meta-targetable (not generic like 'shopping')"
 )

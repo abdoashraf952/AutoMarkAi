@@ -1,10 +1,11 @@
 """Creative node — generates ad copies, headlines, CTA, visual prompt, and ad images."""
 
+import base64
 import json
 import logging
 import os
 
-from llm_client import _parse_json_with_retry, call_llm, generate_ad_images
+from llm_client import _parse_json_with_retry, call_llm, enhance_ad_image, generate_ad_images
 from prompts.creative import SYSTEM, USER_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -46,17 +47,41 @@ def creative_node(state: dict) -> dict:
         raw, provider = call_llm(prompt, SYSTEM, "creative", allow_fallback=True)
         creative_output = _parse_json_with_retry(raw)
 
-        # Generate ad images from visual_prompt (count from env)
+        # Generate / source ad images based on the user-selected image mode
+        image_mode = state.get("image_mode", "use_original")
+        image_path = state.get("image_path", "")
         visual_prompt = creative_output.get("visual_prompt", "")
         generated_images: list[str] = []
         img_errors: list[str] = []
-        if visual_prompt:
-            try:
-                generated_images = generate_ad_images(visual_prompt, n=NUM_GENERATED_IMAGES)
-                logger.info("creative_node generated %d images", len(generated_images))
-            except RuntimeError as e:
-                logger.warning("creative_node: image generation failed: %s", e)
-                img_errors.append(f"image_generation_failed: {e}")
+
+        if image_mode == "use_original":
+            # Encode the user's uploaded photo directly — no AI generation
+            if image_path:
+                try:
+                    with open(image_path, "rb") as fh:
+                        generated_images = [base64.b64encode(fh.read()).decode("utf-8")]
+                    logger.info("creative_node: using original uploaded photo")
+                except OSError as e:
+                    img_errors.append(f"original_image_read_failed: {e}")
+        elif visual_prompt:
+            if image_mode == "enhance_with_ai" and image_path:
+                try:
+                    generated_images = enhance_ad_image(image_path, visual_prompt, n=NUM_GENERATED_IMAGES)
+                    logger.info("creative_node: enhanced %d images", len(generated_images))
+                except RuntimeError as e:
+                    logger.warning("creative_node: enhancement failed, falling back to generate: %s", e)
+                    img_errors.append(f"image_enhancement_failed: {e}")
+                    try:
+                        generated_images = generate_ad_images(visual_prompt, n=NUM_GENERATED_IMAGES)
+                    except RuntimeError as e2:
+                        img_errors.append(f"image_generation_fallback_failed: {e2}")
+            else:
+                try:
+                    generated_images = generate_ad_images(visual_prompt, n=NUM_GENERATED_IMAGES)
+                    logger.info("creative_node generated %d images", len(generated_images))
+                except RuntimeError as e:
+                    logger.warning("creative_node: image generation failed: %s", e)
+                    img_errors.append(f"image_generation_failed: {e}")
 
         creative_output["generated_images"] = generated_images
 

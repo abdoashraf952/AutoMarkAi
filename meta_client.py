@@ -71,6 +71,18 @@ _CTA_TYPE: dict[str, str] = {
 }
 
 
+# Approximate exchange rates: 1 USD → N units of that currency.
+# Used to convert USD budget/bid amounts to the account's billing currency.
+# Override with META_EXCHANGE_RATE in .env when precision matters.
+_USD_TO_CURRENCY_APPROX: dict[str, float] = {
+    "USD": 1.0,   "CAD": 1.36,  "AUD": 1.53,  "GBP": 0.79,   "EUR": 0.92,
+    "EGP": 49.5,  "AED": 3.67,  "SAR": 3.75,  "KWD": 0.307,  "QAR": 3.64,
+    "BHD": 0.376, "OMR": 0.385, "JOD": 0.709, "MAD": 9.97,   "LYD": 4.84,
+    "TRY": 32.5,  "INR": 83.5,  "PKR": 278.0, "NGN": 1600.0, "ZAR": 18.5,
+    "BRL": 5.0,   "MXN": 17.0,  "JPY": 150.0, "CNY": 7.25,   "KES": 130.0,
+}
+
+
 def _meta_id() -> str:
     """Generate a realistic-looking Meta object ID (14-digit string prefixed with 2385)."""
     return "2385" + "".join(random.choices(string.digits, k=10))
@@ -109,7 +121,7 @@ def _resolve_interests(interest_names: list[str], access_token: str) -> list[dic
     for name in interest_names:
         try:
             resp = requests.get(
-                "https://graph.facebook.com/v20.0/search",
+                "https://graph.facebook.com/v25.0/search",
                 params={
                     "type": "adinterest",
                     "q": name,
@@ -394,11 +406,46 @@ class RealMetaClient(MetaClient):
         # appsecret_proof, which avoids "Invalid appsecret_proof" errors
         # when testing with Graph API Explorer tokens.
         FacebookAdsApi.init(self._app_id, None, self._access_token)
-        logger.info("MetaClient: real mode active — ad_account=%s", self._ad_account_id)
+        self._account_currency: str = self._fetch_account_currency()
+        logger.info("MetaClient: real mode active — ad_account=%s currency=%s",
+                    self._ad_account_id, self._account_currency)
 
     def _account(self):
         from facebook_business.adobjects.adaccount import AdAccount
         return AdAccount(f"act_{self._ad_account_id}")
+
+    def _fetch_account_currency(self) -> str:
+        """Fetch the ad account's billing currency from Meta API."""
+        try:
+            result = self._account().api_get(fields=["currency"])
+            return result.get("currency", "USD").upper()
+        except Exception as e:
+            logger.warning("MetaClient: could not fetch account currency, defaulting to USD: %s", e)
+            return "USD"
+
+    def _usd_to_account_subunits(self, usd_amount: float) -> int:
+        """
+        Convert a USD amount to the account's billing currency in its smallest
+        sub-unit (e.g. piastres for EGP, cents for USD, halala for SAR).
+
+        Rate source priority:
+          1. META_EXCHANGE_RATE env var (exact override)
+          2. Built-in _USD_TO_CURRENCY_APPROX table
+          3. 1:1 fallback with a warning
+        """
+        env_rate = os.getenv("META_EXCHANGE_RATE")
+        if env_rate:
+            rate = float(env_rate)
+        else:
+            rate = _USD_TO_CURRENCY_APPROX.get(self._account_currency, 0.0)
+            if not rate:
+                logger.warning(
+                    "MetaClient: unknown currency '%s' — treating as 1:1 with USD. "
+                    "Set META_EXCHANGE_RATE in .env to override.",
+                    self._account_currency,
+                )
+                rate = 1.0
+        return int(usd_amount * rate * 100)
 
     # ---- Campaign --------------------------------------------------------
 
@@ -438,7 +485,7 @@ class RealMetaClient(MetaClient):
         media = bundle.get("media", {})
         campaign_data = bundle.get("campaign", {})
         audience = media.get("audience", {})
-        daily_budget_cents = int(media.get("daily_budget_usd", 10) * 100)
+        daily_budget_subunits = self._usd_to_account_subunits(media.get("daily_budget_usd", 10))
 
         raw_opt_goal = media.get("optimization_goal", "CONVERSATIONS")
         optimization_goal = _normalize_opt_goal(raw_opt_goal)
@@ -449,29 +496,45 @@ class RealMetaClient(MetaClient):
         raw_interests = audience.get("interests", [])
         interests = _resolve_interests(raw_interests, self._access_token)
 
+        raw_locations = audience.get("locations") or ["US"]
+        if isinstance(raw_locations, str):
+            raw_locations = [raw_locations]
         targeting = {
             "age_min": audience.get("age_min", 18),
             "age_max": audience.get("age_max", 65),
+            "geo_locations": {"countries": raw_locations},
+            # Meta v25.0+ requires this flag to be explicitly set (0 = use manual targeting)
+            "targeting_automation": {"advantage_audience": 0},
         }
         # Only include interests if we successfully resolved at least one
         if interests:
             targeting["flexible_spec"] = [{"interests": interests}]
+
+        # LOWEST_COST_WITH_BID_CAP and COST_CAP require a bid_amount; fall back if missing
+        bid_strategy = media.get("bid_strategy", "LOWEST_COST_WITHOUT_CAP").upper()
+        bid_amount_usd = media.get("bid_amount_usd")
+        if bid_strategy in ("LOWEST_COST_WITH_BID_CAP", "COST_CAP") and not bid_amount_usd:
+            bid_strategy = "LOWEST_COST_WITHOUT_CAP"
+
         params = {
             AdSet.Field.name: name,
             AdSet.Field.campaign_id: campaign_id,
-            AdSet.Field.daily_budget: daily_budget_cents,
+            AdSet.Field.daily_budget: daily_budget_subunits,
             AdSet.Field.optimization_goal: optimization_goal,
             AdSet.Field.billing_event: AdSet.BillingEvent.impressions,
+            AdSet.Field.bid_strategy: bid_strategy,
             AdSet.Field.targeting: targeting,
             AdSet.Field.status: AdSet.Status.paused,
         }
+        if bid_amount_usd and bid_strategy in ("LOWEST_COST_WITH_BID_CAP", "COST_CAP"):
+            params[AdSet.Field.bid_amount] = self._usd_to_account_subunits(bid_amount_usd)
         result = self._account().create_ad_set(params=params)
         return {
             "id": result["id"],
             "name": result.get("name", name),
             "status": result.get("status", "PAUSED"),
             "campaign_id": campaign_id,
-            "daily_budget": str(daily_budget_cents),
+            "daily_budget": str(daily_budget_subunits),
             "optimization_goal": optimization_goal,
             "billing_event": "IMPRESSIONS",
             "targeting": targeting,
@@ -500,18 +563,26 @@ class RealMetaClient(MetaClient):
         if images:
             try:
                 img_bytes = base64.b64decode(images[0])
-                url = f"https://graph.facebook.com/v20.0/act_{self._ad_account_id}/adimages"
+                url = f"https://graph.facebook.com/v25.0/act_{self._ad_account_id}/adimages"
                 files = {"filename": ("ad_image.png", img_bytes, "image/png")}
                 data = {"access_token": self._access_token}
                 resp = requests.post(url, data=data, files=files)
                 if resp.status_code == 200:
-                    # Meta returns {"images": {"filename": {"hash": "...", ...}}}
-                    image_hash = resp.json().get("images", {}).get("filename", {}).get("hash")
+                    # Meta returns {"images": {"<filename>": {"hash": "...", ...}}}
+                    # The key is the actual filename, not the literal string "filename"
+                    images_map = resp.json().get("images", {})
+                    image_hash = next(iter(images_map.values()), {}).get("hash")
                     logger.info("Ad image uploaded, hash=%s", image_hash)
                 else:
                     logger.warning("Ad image upload failed: %s", resp.text)
             except Exception as e:
                 logger.warning("Ad image upload error: %s", e)
+
+        if not image_hash:
+            raise RuntimeError(
+                "Ad image upload failed or returned no hash — cannot create ad creative without media. "
+                "Check that generated_images is populated and the access token has ads_management permission."
+            )
 
         object_story_spec = {
             "page_id": self._page_id,
@@ -522,8 +593,7 @@ class RealMetaClient(MetaClient):
                 "call_to_action": {"type": cta_type},
             },
         }
-        if image_hash:
-            object_story_spec["link_data"]["image_hash"] = image_hash
+        object_story_spec["link_data"]["image_hash"] = image_hash
 
         params = {
             AdCreative.Field.name: name,
@@ -573,7 +643,7 @@ class RealMetaClient(MetaClient):
         if images:
             # Upload the generated image directly to the Page's photos
             img_bytes = base64.b64decode(images[0])
-            url = f"https://graph.facebook.com/v20.0/{self._page_id}/photos"
+            url = f"https://graph.facebook.com/v25.0/{self._page_id}/photos"
             files = {
                 "source": ("image.png", img_bytes, "image/png")
             }
