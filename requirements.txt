@@ -8,3 +8,5 @@ pillow>=10.0.0
 pytest>=8.0.0
 streamlit>=1.35.0
 facebook-business>=3.0.0
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2

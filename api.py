@@ -209,6 +209,8 @@ async def start_session(
     goal: str = Form(..., description="Campaign goal, e.g. 'get WhatsApp leads for luxury watch'"),
     budget: float = Form(..., description="Total campaign budget in USD"),
     image_mode: str = Form("use_original", description="'use_original' or 'enhance_with_ai'"),
+    marketing_type: str = Form("product", description="'product', 'business', or 'service'"),
+    language: str = Form("en", description="'en' for English, 'ar' for Egyptian Arabic"),
     image: UploadFile = File(..., description="Product photo (jpg/png/webp)"),
 ):
     """
@@ -226,6 +228,8 @@ async def start_session(
     await _advance(session, {
         "image_path": session["image_path"],
         "image_mode": image_mode,
+        "marketing_type": marketing_type,
+        "language": language,
         "budget": float(budget),
         "goal": goal,
         "errors": [],

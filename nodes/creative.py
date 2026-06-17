@@ -6,11 +6,10 @@ import logging
 import os
 
 from llm_client import _parse_json_with_retry, call_llm, enhance_ad_image, generate_ad_images
-from prompts.creative import SYSTEM, USER_TEMPLATE
+from i18n import get_creative_prompts
 
 logger = logging.getLogger(__name__)
 
-# Read configurable image count from environment
 NUM_GENERATED_IMAGES = int(os.getenv("NUM_GENERATED_IMAGES", "1"))
 
 
@@ -18,36 +17,48 @@ def creative_node(state: dict) -> dict:
     """
     Generate ad creative assets from campaign_plan.
 
-    After LLM text generation, calls Imagen to generate ad images from
-    visual_prompt. Number of images is configurable via NUM_GENERATED_IMAGES
-    env var (default: 1). Stores them as base64 strings in
-    creative_output["generated_images"].
+    Picks prompts from the locale system (language + marketing_type).
+    Appends user feedback on redo passes.
+    Sources the ad image based on image_mode.
 
-    If state["feedback"]["creative"] is set (redo pass), appends the feedback
-    to the LLM prompt so the model revises its output.
-
-    Uses Gemini with Groq fallback on rate limit / service errors.
+    State reads:  campaign_plan, budget, goal, image_mode, image_path, feedback, language, marketing_type
+    State writes: creative_output, llm_used, errors
     """
+    # Resolve language / marketing_type from plan or state (plan is authoritative after orchestrator)
+    plan = state.get("campaign_plan") or {}
+    language = plan.get("language") or state.get("language", "en")
+    marketing_type = plan.get("marketing_type") or state.get("marketing_type", "product")
+
+    system, user_template = get_creative_prompts(language, marketing_type)
+
     try:
         # Inject text feedback if this is a redo pass
-        extra = ""
         creative_feedback = (state.get("feedback") or {}).get("creative", "")
         if creative_feedback:
-            extra = (
-                f"\n\nUser feedback on previous version: {creative_feedback}\n"
-                "Please revise the copies, headlines, and CTA accordingly."
-            )
+            if language == "ar":
+                feedback_context = (
+                    f"\n\nملاحظة المستخدم على النسخة السابقة: {creative_feedback}\n"
+                    "عدّل النصوص والعناوين بناءً على الملاحظة دي.\n"
+                )
+            else:
+                feedback_context = (
+                    f"\n\nUser feedback on previous version: {creative_feedback}\n"
+                    "Please revise the copies, headlines, and CTA accordingly.\n"
+                )
+        else:
+            feedback_context = ""
 
-        prompt = USER_TEMPLATE.format(
-            campaign_plan_json=json.dumps(state["campaign_plan"], indent=2),
+        prompt = user_template.format(
+            campaign_plan_json=json.dumps(plan, indent=2, ensure_ascii=False),
             budget=state["budget"],
             goal=state["goal"],
-        ) + extra
+            feedback_context=feedback_context,
+        )
 
-        raw, provider = call_llm(prompt, SYSTEM, "creative", allow_fallback=True)
+        raw, provider = call_llm(prompt, system, "creative", allow_fallback=True)
         creative_output = _parse_json_with_retry(raw)
 
-        # Generate / source ad images based on the user-selected image mode
+        # Source ad image based on image_mode
         image_mode = state.get("image_mode", "use_original")
         image_path = state.get("image_path", "")
         visual_prompt = creative_output.get("visual_prompt", "")
@@ -55,7 +66,6 @@ def creative_node(state: dict) -> dict:
         img_errors: list[str] = []
 
         if image_mode == "use_original":
-            # Encode the user's uploaded photo directly — no AI generation
             if image_path:
                 try:
                     with open(image_path, "rb") as fh:
@@ -63,6 +73,7 @@ def creative_node(state: dict) -> dict:
                     logger.info("creative_node: using original uploaded photo")
                 except OSError as e:
                     img_errors.append(f"original_image_read_failed: {e}")
+
         elif visual_prompt:
             if image_mode == "enhance_with_ai" and image_path:
                 try:
@@ -85,7 +96,7 @@ def creative_node(state: dict) -> dict:
 
         creative_output["generated_images"] = generated_images
 
-        logger.info("creative_node complete via %s", provider)
+        logger.info("creative_node complete via %s (lang=%s type=%s)", provider, language, marketing_type)
         return {
             "creative_output": creative_output,
             "llm_used": {"creative": provider},

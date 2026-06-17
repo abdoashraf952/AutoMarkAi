@@ -3,36 +3,54 @@
 import logging
 
 from llm_client import _parse_json_with_retry, call_llm_vision
-from prompts.orchestrator import SYSTEM, USER_TEMPLATE
+from i18n import get_orchestrator_prompts
 
 logger = logging.getLogger(__name__)
 
 
 def orchestrator_node(state: dict) -> dict:
     """
-    Analyze the product image and user inputs to produce a structured campaign_plan.
+    Analyze the product/business/service image and user inputs to produce campaign_plan.
 
-    Uses Gemini multimodal (vision). No Groq fallback on this node.
-    On failure, writes to errors and returns empty campaign_plan (triggers early exit in main.py).
+    Uses Gemini multimodal (vision). No Groq fallback — vision calls require Gemini.
+    On failure, writes to errors and returns empty campaign_plan.
+
+    State reads:  image_path, budget, goal, marketing_type, language, questions, user_answers
+    State writes: campaign_plan, llm_used, errors
     """
-    try:
-        prompt = USER_TEMPLATE.format(budget=state["budget"], goal=state["goal"])
+    language = state.get("language", "en")
+    marketing_type = state.get("marketing_type", "product")
 
-        # Edit 2: append Q&A context from question_generator_node if available
+    system, user_template = get_orchestrator_prompts(language, marketing_type)
+
+    try:
+        # Build Q&A context block from question_generator_node
         questions = state.get("questions") or []
         answers = state.get("user_answers") or {}
+        qa_context = ""
         if questions and answers:
-            qa_lines = ["\n\nAdditional product context from user Q&A:"]
+            lines = ["Additional context from user Q&A:\n"]
             for i, question in enumerate(questions):
                 answer = answers.get(str(i), answers.get(i, ""))
                 if answer:
-                    qa_lines.append(f"Q: {question}")
-                    qa_lines.append(f"A: {answer}")
-            prompt += "\n".join(qa_lines)
+                    lines.append(f"Q: {question}")
+                    lines.append(f"A: {answer}\n")
+            qa_context = "\n".join(lines) + "\n"
 
-        raw = call_llm_vision(state["image_path"], prompt, SYSTEM)
+        prompt = user_template.format(
+            budget=state["budget"],
+            goal=state["goal"],
+            qa_context=qa_context,
+        )
+
+        raw = call_llm_vision(state["image_path"], prompt, system)
         campaign_plan = _parse_json_with_retry(raw)
-        logger.info("orchestrator_node produced campaign_plan: %s", campaign_plan)
+
+        # Inject language and marketing_type into the plan so downstream nodes can use them
+        campaign_plan["language"] = language
+        campaign_plan["marketing_type"] = marketing_type
+
+        logger.info("orchestrator_node produced campaign_plan (lang=%s type=%s)", language, marketing_type)
         return {
             "campaign_plan": campaign_plan,
             "llm_used": {"orchestrator": "gemini"},

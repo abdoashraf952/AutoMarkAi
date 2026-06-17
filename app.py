@@ -75,6 +75,7 @@ def _init():
         "final_state": None,
         "meta_publish_result": None,
         "meta_publish_error": None,
+        "language": "en",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -86,29 +87,88 @@ def _init():
 # ------------------------------------------------------------------ #
 
 def _stage_setup():
-    st.header("Campaign Setup")
+    # Language selector — affects questions, copy, and UI labels
+    lang_col, _ = st.columns([1, 2])
+    with lang_col:
+        language = st.selectbox(
+            "Language / اللغة",
+            options=["en", "ar"],
+            format_func=lambda x: "English" if x == "en" else "العربية (مصري)",
+            key="language_select",
+        )
+    st.session_state["language"] = language
+
+    # Load locale strings for dynamic labels
+    try:
+        from i18n import get_strings
+        s = get_strings(language)
+    except Exception:
+        s = None
+
+    header = (s.SETUP_HEADER if s else None) or "Campaign Setup"
+    st.header(header)
+
+    # Marketing type selection
+    type_labels = {
+        "en": {
+            "product": "Product — a physical or digital item you sell",
+            "business": "Business — a shop, clinic, restaurant, or brand",
+            "service": "Service — consulting, cleaning, tutoring, design, etc.",
+        },
+        "ar": {
+            "product": "منتج — حاجة بتبيعها (هاردوير، ملابس، أكل، تطبيق)",
+            "business": "بيزنس — محل، عيادة، مطعم، أو براند",
+            "service": "خدمة — استشارات، تنظيف، تدريس، تصميم، إلخ",
+        },
+    }
+    type_label_map = type_labels.get(language, type_labels["en"])
+    marketing_type_label = st.radio(
+        "What are you marketing? / بتسوّق إيه؟" if language == "ar" else "What are you marketing?",
+        options=list(type_label_map.values()),
+    )
+    marketing_type = {v: k for k, v in type_label_map.items()}[marketing_type_label]
 
     uploaded = st.file_uploader(
-        "Upload product image", type=["jpg", "jpeg", "png", "webp"]
+        "Upload image / ارفع صورة" if language == "ar" else "Upload image",
+        type=["jpg", "jpeg", "png", "webp"],
+    )
+    image_mode_options = (
+        ["استخدم صورتي الأصلية", "حسّن بالـ AI"]
+        if language == "ar"
+        else ["Use my original photo", "Enhance with AI"]
     )
     image_mode_label = st.radio(
-        "Image option",
-        options=["Use my original photo", "Enhance with AI"],
+        "Image option / خيار الصورة" if language == "ar" else "Image option",
+        options=image_mode_options,
         help=(
+            "**استخدم صورتي الأصلية** — صورتك تُستخدم مباشرة كصورة الإعلان.\n\n"
+            "**حسّن بالـ AI** — جيميني يعدّل صورتك عشان تبقى أنسب للإعلانات."
+            if language == "ar" else
             "**Use my original photo** — your uploaded image is used directly as the ad image.\n\n"
-            "**Enhance with AI** — Gemini Imagen edits your photo to make it more ad-ready "
-            "(uses Gemini credits)."
+            "**Enhance with AI** — Gemini edits your photo to make it more ad-ready."
         ),
     )
-    image_mode = "use_original" if image_mode_label == "Use my original photo" else "enhance_with_ai"
-
-    budget = st.number_input("Budget (USD)", min_value=1.0, value=500.0, step=50.0)
-    goal = st.text_input(
-        "Campaign goal",
-        placeholder="e.g. get WhatsApp leads for luxury watch",
+    image_mode = (
+        "use_original"
+        if image_mode_label in ("Use my original photo", "استخدم صورتي الأصلية")
+        else "enhance_with_ai"
     )
 
-    if st.button("Generate Campaign", disabled=not (uploaded and goal)):
+    budget = st.number_input(
+        "Budget (USD) / الميزانية (دولار)" if language == "ar" else "Budget (USD)",
+        min_value=1.0, value=500.0, step=50.0,
+    )
+    goal = st.text_input(
+        "Campaign goal / هدف الحملة" if language == "ar" else "Campaign goal",
+        placeholder=(
+            "مثال: تجيب عملاء واتساب لساعات فاخرة"
+            if language == "ar"
+            else "e.g. get WhatsApp leads for luxury watch"
+        ),
+    )
+
+    btn_label = "ولّد الحملة" if language == "ar" else "Generate Campaign"
+    if st.button(btn_label, disabled=not (uploaded and goal)):
         suffix = Path(uploaded.name).suffix
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(uploaded.read())
@@ -119,6 +179,8 @@ def _stage_setup():
         initial_state = {
             "image_path": image_path,
             "image_mode": image_mode,
+            "marketing_type": marketing_type,
+            "language": language,
             "budget": float(budget),
             "goal": goal,
             "errors": [],
@@ -133,20 +195,37 @@ def _stage_setup():
 
 
 def _stage_questions():
-    st.header("Product Questions")
-    st.write("Answer these questions so we can tailor your campaign:")
+    language = st.session_state.get("language", "en")
+
+    try:
+        from i18n import get_strings
+        s = get_strings(language)
+        marketing_type = st.session_state.get("interrupt_data", {}).get("marketing_type", "product")
+        header = getattr(s, "QUESTIONS_HEADER", "Tell Us More").format(
+            marketing_type=getattr(s, "MARKETING_TYPE_LABELS", {}).get(marketing_type, marketing_type)
+        )
+        subtext = getattr(s, "QUESTIONS_SUBTEXT", "Answer these questions so we can tailor your campaign:")
+    except Exception:
+        header = "Tell Us More"
+        subtext = "Answer these questions so we can tailor your campaign:"
+
+    st.header(header)
+    st.write(subtext)
 
     questions: list[str] = st.session_state["interrupt_data"].get("questions", [])
     answers: dict[str, str] = {}
 
     for i, q in enumerate(questions):
-        answers[str(i)] = st.text_input(f"**Q{i + 1}:** {q}", key=f"q_{i}")
+        answers[str(i)] = st.text_input(f"**{i + 1}.** {q}", key=f"q_{i}")
 
     all_answered = all(v.strip() for v in answers.values())
 
-    if st.button("Submit Answers", disabled=not all_answered):
+    btn_label = "إرسال الإجابات" if language == "ar" else "Submit Answers"
+    spinner_text = "جاري بناء الحملة وتوليد المحتوى…" if language == "ar" else "Building campaign plan and generating ad content…"
+
+    if st.button(btn_label, disabled=not all_answered):
         from langgraph.types import Command
-        with st.spinner("Building campaign plan and generating ad content…"):
+        with st.spinner(spinner_text):
             interrupt_obj = _advance(Command(resume={"answers": answers}))
 
         _set_interrupt(interrupt_obj)
