@@ -25,11 +25,12 @@ It asks you 4 product-specific questions, lets you review and approve the genera
 
 ---
 
-## Two Ways to Run
+## Three Ways to Run
 
 | Mode | Command | Features |
 | --- | --- | --- |
-| **Streamlit UI** (recommended) | `streamlit run app.py` | Full interactive flow with Q&A, image review, copy review, Meta publish |
+| **FastAPI** (recommended for production) | `uvicorn api:app --reload --port 8000` | REST API + SSE streaming — plug directly into a Next.js or any frontend |
+| **Streamlit UI** (recommended for demos) | `streamlit run app.py` | Full interactive flow with Q&A, image review, copy review, Meta publish |
 | **CLI** (fallback) | `python main.py --image X --budget Y --goal Z` | Single invocation, no review steps, no publish |
 
 ---
@@ -130,18 +131,19 @@ The CLI graph skips `question_generator_node`, `review_node`, and the Meta publi
 ```
 AutoMarkAi/
 │
-├── app.py                    ← Streamlit UI (primary interface)
-├── main.py                   ← CLI entry point (fallback)
+├── api.py                    ← FastAPI backend — 13 REST endpoints + SSE streaming
+├── app.py                    ← Streamlit UI (demo/development interface)
+├── main.py                   ← CLI entry point (no review, no publish)
 ├── graph.py                  ← CLI graph — no interrupts, no checkpointer
-├── streamlit_graph.py        ← Streamlit graph — MemorySaver, all nodes
+├── streamlit_graph.py        ← Full graph — MemorySaver, all nodes (used by both api.py and app.py)
 ├── state.py                  ← Shared state schema (TypedDict)
-├── llm_client.py             ← LLM abstraction — Gemini, Groq fallback, Imagen 4
+├── llm_client.py             ← LLM abstraction — Gemini, Groq fallback, Gemini 3.1 Flash Image
 ├── meta_client.py            ← Meta Marketing API client (simulated + real)
 │
 ├── nodes/
 │   ├── question_generator.py ← Node 0: vision → 4 questions + interrupt for answers
 │   ├── orchestrator.py       ← Node 1: vision + Q&A context → campaign_plan
-│   ├── creative.py           ← Node 2: text + image sourcing (original or Imagen edit)
+│   ├── creative.py           ← Node 2: text + image sourcing (original or Gemini image edit)
 │   ├── media_buying.py       ← Node 3: text → budget, audience, placements
 │   ├── review.py             ← Node 4: interrupt → image review + text review
 │   └── merge.py              ← Node 5: pure Python validation + JSON assembly
@@ -165,6 +167,8 @@ AutoMarkAi/
 ├── requirements.txt          ← Python dependencies
 ├── .env.example              ← Template for environment variables
 └── .env                      ← API keys and config (never commit this file)
+
+test_api.py                   ← End-to-end API test script (project root)
 ```
 
 ---
@@ -392,6 +396,170 @@ Resume with:    {"chosen_index": 0}
 
 ---
 
+## FastAPI Backend (`api.py`)
+
+`api.py` exposes the full pipeline as a REST API with SSE streaming. It is the recommended interface for connecting a Next.js (or any other) frontend. Internally it drives the same LangGraph `streamlit_graph` that the Streamlit app uses — all nodes, interrupts, and checkpointing are identical.
+
+### Starting the server
+
+```bash
+cd AutoMarkAi
+uvicorn api:app --reload --port 8000
+```
+
+Interactive docs (Swagger UI): `http://localhost:8000/docs`
+
+### Endpoints
+
+| # | Method | Path | Tag | What it does |
+|---|--------|------|-----|--------------|
+| 1 | `GET` | `/health` | Utilities | Health check — returns `{"status": "ok"}` |
+| 2 | `POST` | `/upload-image` | Utilities | Pre-upload a product image; returns `file_id` |
+| 3 | `POST` | `/session` | Session | Create a new session; returns `session_id` |
+| 4 | `POST` | `/session/{id}/start` | Session | Upload image + start pipeline; blocks until first interrupt (`questions`) |
+| 5 | `GET` | `/session/{id}/stream` | Session | **SSE stream** — live progress events as the graph runs |
+| 6 | `GET` | `/session/{id}/state` | Session | Current stage + interrupt data (no base64 blobs) |
+| 7 | `GET` | `/session/{id}/images` | Session | Base64 ad images for the current stage or final bundle |
+| 8 | `POST` | `/session/{id}/answers` | Human-in-the-loop | Submit answers to product questions; advances graph to image review |
+| 9 | `POST` | `/session/{id}/image-decision` | Human-in-the-loop | Approve or regenerate the ad image |
+| 10 | `POST` | `/session/{id}/pick-image` | Human-in-the-loop | Pick from history after max regenerations exceeded |
+| 11 | `POST` | `/session/{id}/text-decision` | Human-in-the-loop | Approve or request changes to ad copy |
+| 12 | `POST` | `/session/{id}/publish` | Publish | Publish campaign to Meta (requires stage `done`) |
+| 13 | `GET` | `/session/{id}/result` | Publish | Final campaign bundle + publish result |
+
+### Full request/response flow
+
+```
+POST /session                     → {"session_id": "..."}
+POST /session/{id}/start          → {"stage": "questions", "data": {"questions": [...]}}
+  (user reads questions)
+POST /session/{id}/answers        → {"stage": "image_review", "data": {...}}
+  (user views images via GET /session/{id}/images)
+POST /session/{id}/image-decision → {"stage": "text_review", "data": {"copies": [...], "headlines": [...]}}
+POST /session/{id}/text-decision  → {"stage": "done", "data": {}}
+POST /session/{id}/publish        → {"success": true, "result": {"campaign": {...}, "ad": {...}, "post": {...}}}
+GET  /session/{id}/result         → {"bundle": {...}, "publish_result": {...}}
+```
+
+### SSE streaming (Next.js example)
+
+Connect to `/session/{id}/stream` with `EventSource` to receive live progress while the graph runs in the background. Events arrive between each POST call:
+
+```javascript
+const source = new EventSource(`http://localhost:8000/session/${sessionId}/stream`);
+source.onmessage = (e) => {
+  const event = JSON.parse(e.data);
+  // event.event: "progress" | "interrupt" | "done" | "ping"
+  // event.stage: "questions_ready" | "planning" | "creative" | "image_review" | "text_review" | "done" | ...
+  console.log(event);
+};
+```
+
+### Request body schemas
+
+**`POST /session/{id}/start`** — multipart/form-data:
+```
+goal        string   "get WhatsApp leads for luxury watch"
+budget      float    500.0
+image_mode  string   "use_original" | "enhance_with_ai"
+image       file     product photo (jpg/png/webp)
+```
+
+**`POST /session/{id}/answers`** — JSON:
+```json
+{"answers": {"0": "answer1", "1": "answer2", "2": "answer3", "3": "answer4"}}
+```
+
+**`POST /session/{id}/image-decision`** — JSON:
+```json
+{"action": "approve"}
+{"action": "regenerate", "feedback": {"0": "make the background white"}}
+```
+
+**`POST /session/{id}/pick-image`** — JSON (only after `max_regenerations_exceeded`):
+```json
+{"chosen_index": 0}
+```
+
+**`POST /session/{id}/text-decision`** — JSON:
+```json
+{"action": "approve"}
+{"action": "edit", "feedback": "Make the tone more urgent and shorten the copies"}
+```
+
+**`POST /session/{id}/publish`** — JSON:
+```json
+{"make_sponsored_ad": true, "make_organic_post": true}
+```
+
+---
+
+## Testing the API (`test_api.py`)
+
+`test_api.py` (project root) is an end-to-end test script that walks through the entire happy path automatically.
+
+### Setup
+
+```bash
+# Install test dependency (if not already installed)
+pip install Pillow requests
+```
+
+### Usage
+
+```bash
+# Terminal 1 — start the server
+cd AutoMarkAi
+uvicorn api:app --reload --port 8000
+
+# Terminal 2 — run the full test
+cd ..                        # back to project root
+python test_api.py
+```
+
+### Options
+
+```
+--base-url    Server URL (default: http://localhost:8000)
+--image       Path to a real product image (default: generates a synthetic test image)
+--goal        Campaign goal text (default: "get WhatsApp leads for gaming keyboards")
+--budget      Budget in USD (default: 500.0)
+--image-mode  "use_original" or "enhance_with_ai" (default: "use_original")
+```
+
+**Examples:**
+
+```bash
+# Use a real product image
+python test_api.py --image AutoMarkAi/tests/sample_input/watch.jpg --goal "sell luxury watches"
+
+# Test the enhance_with_ai image mode
+python test_api.py --image AutoMarkAi/tests/sample_input/keyborad.jpeg --image-mode enhance_with_ai
+
+# Test against a deployed server
+python test_api.py --base-url https://your-api.example.com
+```
+
+### What the test covers
+
+| Step | Endpoint | Assertion |
+|------|----------|-----------|
+| 1 | `GET /health` | status == ok |
+| 2 | `POST /upload-image` | returns file_id |
+| 3 | `POST /session` | returns session_id |
+| 4 | `POST /session/{id}/start` | stage == questions |
+| 5 | `GET /session/{id}/state` | stage == questions |
+| 6 | `POST /session/{id}/answers` | stage == image_review |
+| 7 | `GET /session/{id}/images` | count > 0 |
+| 8 | `POST /session/{id}/image-decision` | stage == text_review (or handles max_regen) |
+| 9 | `POST /session/{id}/text-decision` | stage == done |
+| 10 | `GET /session/{id}/result` | bundle present with product/campaign/media |
+| 11 | `POST /session/{id}/publish` | returns success + campaign IDs |
+
+The script prints colored status codes, elapsed time per step, generated questions, ad copies, and publish IDs. Expected total runtime: **2–5 minutes** (dominated by LLM + image generation calls).
+
+---
+
 ## Meta Client (`meta_client.py`)
 
 Wraps the Meta Marketing API v25.0 with two implementations behind a common interface.
@@ -462,7 +630,8 @@ Used by `orchestrator_node` and `question_generator_node`. No Groq fallback (Gro
 Used when `image_mode = "enhance_with_ai"` and no source image is available, or as fallback.
 
 ```
-Call Imagen 4 (imagen-4.0-fast-generate-001) via google-genai SDK
+Call Gemini 3.1 Flash Image ("gemini-3.1-flash-image", Nano Banana 2) via google-genai SDK
+  response_modalities=[TEXT, IMAGE]
   ├── Success → list of n base64-encoded PNG strings
   └── Failure → raise RuntimeError
 ```
@@ -472,11 +641,14 @@ Call Imagen 4 (imagen-4.0-fast-generate-001) via google-genai SDK
 Used by `creative_node` and `review_node` when `image_mode = "enhance_with_ai"`.
 
 ```
-Load user's photo → pass as RawReferenceImage to Imagen edit API
-Call Imagen 3 edit (imagen-3.0-capability-001) via google-genai SDK
+Load user's photo as PIL Image
+Call Gemini 3.1 Flash Image with contents=[image, prompt]
+  response_modalities=[TEXT, IMAGE]
   ├── Success → list of n base64-encoded PNG strings
   └── Failure → raise RuntimeError (creative_node falls back to generate_ad_images)
 ```
+
+> Both functions share the same `_gemini_image_call()` helper. The model receives the user's actual photo as a real input (not just a style hint), so the enhanced image preserves the product subject while applying ad-ready styling and composition.
 
 ---
 
@@ -627,7 +799,7 @@ Copy `.env.example` to `.env` and configure:
 4. Find your Ad Account ID in Meta Ads Manager (the number after `act_`)
 5. Find your Page ID in your Facebook Page settings
 
-> **Note on Imagen:** Imagen image generation and enhancement (`imagen-4.0-fast-generate-001`, `imagen-3.0-capability-001`) may require billing enabled on your Google AI Studio account. If quota is exceeded, `creative_node` logs a warning and stores `generated_images: []` — the rest of the pipeline continues normally.
+> **Note on image generation:** Gemini 3.1 Flash Image (`gemini-3.1-flash-image`) may require billing enabled on your Google AI Studio account. If quota is exceeded, `creative_node` logs a warning and stores `generated_images: []` — the rest of the pipeline continues normally.
 
 ---
 
@@ -691,14 +863,14 @@ The Streamlit pipeline makes up to **5 LLM calls per run** (more on redo passes)
 | `question_generator_node` | Gemini Vision | 1 call |
 | `orchestrator_node` | Gemini Vision | 1 call |
 | `creative_node` (text) | Gemini / Groq fallback | 1 call per run |
-| `creative_node` (image) | Imagen 4 or Imagen 3 edit | 1 call; only in `enhance_with_ai` mode |
+| `creative_node` (image) | Gemini 3.1 Flash Image | 1 call; only in `enhance_with_ai` mode |
 | `media_buying_node` | Gemini / Groq fallback | 1 call |
 
 | Provider | Free Tier Limit | Behavior When Hit |
 | --- | --- | --- |
 | Gemini 2.5 Flash | ~15 RPM / 1,500 RPD | Triggers automatic Groq fallback |
 | Groq llama-3.3-70b | ~30 RPM | Raises `RuntimeError` |
-| Imagen 4 / Imagen 3 edit | Billing-dependent | `generated_images` set to `[]`, pipeline continues |
+| Gemini 3.1 Flash Image | Billing-dependent | `generated_images` set to `[]`, pipeline continues |
 
 ---
 
@@ -713,11 +885,13 @@ The Streamlit pipeline makes up to **5 LLM calls per run** (more on redo passes)
 **Add a new review step:**
 
 1. Add a new `interrupt()` call inside `review_node`
-2. Add a new `elif stage == "my_stage":` renderer in `app.py`
+2. Add a new `elif stage == "my_stage":` renderer in `app.py` (Streamlit)
+3. Add a new `POST /session/{id}/my-decision` endpoint in `api.py` (FastAPI)
+4. Call `_assert_stage(session, "my_stage")` and `_advance(session, Command(resume=...))` inside it
 
 **Change the image generation model:**
 
-- Edit `llm_client.py` — update `IMAGEN_MODEL` or `IMAGEN_EDIT_MODEL` constants
+- Edit `llm_client.py` — update the `GEMINI_IMAGE_MODEL` constant
 
 **Change the LLM text model:**
 
@@ -728,10 +902,24 @@ The Streamlit pipeline makes up to **5 LLM calls per run** (more on redo passes)
 1. Return it from the relevant node
 2. Add it to `CampaignState` in `state.py`
 3. Include it in `campaign_bundle` inside `merge_node`
-4. Display it in `_stage_done()` inside `app.py`
+4. Display it in `_stage_done()` in `app.py` and/or expose it via `GET /session/{id}/result` in `api.py`
 
 **Switch to real Meta publishing:**
 
 1. Fill in all Meta variables in `.env`
 2. Set `META_SIMULATION_MODE=false`
 3. Use `MAKE_SPONSORED_PAUSED_AD=1` and `MAKE_ORGANIC_POST=1` to control what gets created
+
+**Deploy the FastAPI backend:**
+
+The API is a standard ASGI app — deploy with any ASGI-compatible host:
+
+```bash
+# Production server (no --reload)
+uvicorn api:app --host 0.0.0.0 --port 8000 --workers 1
+
+# With gunicorn + uvicorn workers
+gunicorn api:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+```
+
+> Use `--workers 1` — the in-memory session store is not shared between processes. For multi-worker deployments, replace `_sessions` with a Redis-backed store.
