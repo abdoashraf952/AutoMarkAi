@@ -34,6 +34,16 @@ class CampaignState(TypedDict, total=False):
     feedback: dict      # {"images": {int: str}, "creative": str}
     review_stage: str   # "images" | "redo_creative" | "done"
 
+    # --- image-review sub-state (split review nodes) ---
+    # These let each image generation happen in its own checkpointed graph
+    # super-step so LangGraph never replays (and re-bills) a generation when
+    # the graph resumes from an interrupt.
+    image_history: list      # every image ever generated, in order
+    regen_count: int         # how many regeneration rounds have run
+    review_route: str        # router hint: "to_regen" | "to_pick" | "to_text"
+    regen_indices: list      # which image indices the user rejected
+    image_regen_feedback: dict  # {str(idx): "what to change"} for the rejected ones
+
     # --- final output ---
     campaign_bundle: dict
 

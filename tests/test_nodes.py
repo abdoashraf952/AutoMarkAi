@@ -82,6 +82,8 @@ def test_creative_node_returns_three_copies():
         },
         "budget": 500.0,
         "goal": "get WhatsApp leads",
+        # AI image mode (no source photo) → exercises the generate_ad_images path
+        "image_mode": "enhance_with_ai",
     }
 
     with patch("nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "gemini")):
@@ -206,19 +208,12 @@ def test_merge_node_cta_coherence_fix():
 
 
 # ---------------------------------------------------------------------------
-# Test 5: call_llm falls back to Groq when Gemini raises ResourceExhausted
+# Test 5: call_llm always uses Groq (Gemini is reserved for image generation)
 # ---------------------------------------------------------------------------
 
-def test_fallback_to_groq_on_rate_limit():
-    """call_llm must fall back to Groq when Gemini raises ResourceExhausted (HTTP 429)."""
-    from google.api_core import exceptions as google_exceptions
-
+def test_call_llm_uses_groq():
+    """call_llm must generate text via Groq — Gemini is image-generation only."""
     from llm_client import call_llm
-
-    mock_gemini_model = MagicMock()
-    mock_gemini_model.generate_content.side_effect = google_exceptions.ResourceExhausted(
-        "Quota exceeded"
-    )
 
     mock_groq_message = MagicMock()
     mock_groq_message.content = '{"result": "from groq"}'
@@ -227,14 +222,13 @@ def test_fallback_to_groq_on_rate_limit():
     mock_groq_response = MagicMock()
     mock_groq_response.choices = [mock_groq_choice]
 
-    with patch("llm_client.genai.GenerativeModel", return_value=mock_gemini_model):
-        with patch(
-            "llm_client._groq_client.chat.completions.create",
-            return_value=mock_groq_response,
-        ):
-            text, provider = call_llm(
-                "test prompt", "system prompt", "test_node", allow_fallback=True
-            )
+    with patch(
+        "llm_client._groq_client.chat.completions.create",
+        return_value=mock_groq_response,
+    ) as mock_create:
+        text, provider = call_llm("test prompt", "system prompt", "test_node")
 
     assert provider == "groq", f"Expected 'groq', got '{provider}'"
     assert "groq" in text
+    # The Groq vision/text model is what's called — never Gemini.
+    assert mock_create.call_count == 1

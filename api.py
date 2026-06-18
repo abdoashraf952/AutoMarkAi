@@ -39,8 +39,8 @@ _graph = None
 def _get_graph():
     global _graph
     if _graph is None:
-        from streamlit_graph import get_streamlit_graph
-        _graph = get_streamlit_graph()
+        from pipeline_graph import get_pipeline_graph
+        _graph = get_pipeline_graph()
     return _graph
 
 
@@ -298,8 +298,10 @@ async def image_decision(session_id: str, body: ImageDecisionBody):
     """
     Resume the graph after the 'image_review' interrupt.
 
-    To approve:     {"action": "approve"}
-    To regenerate:  {"action": "regenerate", "feedback": {"0": "make it darker"}}
+    To approve:      {"action": "approve"}
+    To regenerate:   {"action": "regenerate", "feedback": {"0": "make it darker"}}
+    To pick from all
+    previous versions: {"action": "show_history"}   (never regenerates)
 
     If can_regenerate is false (use_original mode), the image is always approved.
     Returns: next stage ('text_review' on approval, 'image_review' again on regenerate,
@@ -313,7 +315,11 @@ async def image_decision(session_id: str, body: ImageDecisionBody):
     n = len(data.get("images", [])) or 1
     can_regen = data.get("can_regenerate", True)
 
-    if body.action == "approve" or not can_regen:
+    if body.action == "show_history":
+        # Jump straight to the picker (original photo + all generated versions);
+        # this never triggers image regeneration.
+        payload = {"action": "pick_from_history"}
+    elif body.action == "approve" or not can_regen:
         payload = {"approved": [True] * n, "feedback": {}}
     else:
         payload = {

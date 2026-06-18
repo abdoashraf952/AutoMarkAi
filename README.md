@@ -18,19 +18,20 @@ It asks you 4 product-specific questions, lets you review and approve the genera
 
 - **Product analysis** — what the product is, visual description
 - **Campaign strategy** — platform (Instagram/Facebook/both), objective, tone
-- **Ad image** — either your original photo, or your photo enhanced by Imagen AI
+- **Ad image** — either your original photo, or your photo enhanced by Gemini AI
 - **Ad creative** — ad copies, headlines, CTA button text
 - **Media buying plan** — budget split per platform, daily budget, audience targeting, placements, bid strategy, estimated reach
 - **Meta publish** — paused sponsored campaign (Campaign → Ad Set → Creative → Ad) and organic page post
 
 ---
 
-## Three Ways to Run
+## Two Ways to Run
+
+The project is split into a **FastAPI backend** (this folder) and a **Next.js frontend** (`../web`).
 
 | Mode | Command | Features |
 | --- | --- | --- |
-| **FastAPI** (recommended for production) | `uvicorn api:app --reload --port 8000` | REST API + SSE streaming — plug directly into a Next.js or any frontend |
-| **Streamlit UI** (recommended for demos) | `streamlit run app.py` | Full interactive flow with Q&A, image review, copy review, Meta publish |
+| **FastAPI + Next.js** (primary) | `uvicorn api:app --reload --port 8000` then `cd ../web && npm run dev` | Full conversational flow — Q&A, image review, copy review, Meta publish |
 | **CLI** (fallback) | `python main.py --image X --budget Y --goal Z` | Single invocation, no review steps, no publish |
 
 ---
@@ -39,7 +40,7 @@ It asks you 4 product-specific questions, lets you review and approve the genera
 
 The system has **two graph variants** built on LangGraph:
 
-### Streamlit Graph (full pipeline)
+### Pipeline Graph (full pipeline, `pipeline_graph.py`)
 
 ```
 User Input (image + budget + goal + image_mode)
@@ -74,8 +75,8 @@ User Input (image + budget + goal + image_mode)
 │   use_original → │     │                       │
 │   encodes photo  │     │                       │
 │   enhance_with_  │     │                       │
-│   ai → Imagen    │     │                       │
-│   edit API       │     │                       │
+│   ai → Gemini    │     │                       │
+│   image model    │     │                       │
 └────────┬─────────┘     └──────────┬────────────┘
          │                          │
          ▼                          │
@@ -131,21 +132,20 @@ The CLI graph skips `question_generator_node`, `review_node`, and the Meta publi
 ```
 AutoMarkAi/
 │
-├── api.py                    ← FastAPI backend — 13 REST endpoints + SSE streaming
-├── app.py                    ← Streamlit UI (demo/development interface)
+├── api.py                    ← FastAPI backend — REST endpoints + SSE streaming
 ├── main.py                   ← CLI entry point (no review, no publish)
 ├── graph.py                  ← CLI graph — no interrupts, no checkpointer
-├── streamlit_graph.py        ← Full graph — MemorySaver, all nodes (used by both api.py and app.py)
+├── pipeline_graph.py         ← Full graph — MemorySaver, all nodes (used by api.py)
 ├── state.py                  ← Shared state schema (TypedDict)
-├── llm_client.py             ← LLM abstraction — Gemini, Groq fallback, Gemini 3.1 Flash Image
+├── llm_client.py             ← LLM abstraction — Groq for all text/vision, Gemini for image gen
 ├── meta_client.py            ← Meta Marketing API client (simulated + real)
 │
 ├── nodes/
-│   ├── question_generator.py ← Node 0: vision → 4 questions + interrupt for answers
+│   ├── question_generator.py ← Node 0: vision → questions + interrupt for answers
 │   ├── orchestrator.py       ← Node 1: vision + Q&A context → campaign_plan
 │   ├── creative.py           ← Node 2: text + image sourcing (original or Gemini image edit)
 │   ├── media_buying.py       ← Node 3: text → budget, audience, placements
-│   ├── review.py             ← Node 4: interrupt → image review + text review
+│   ├── review.py             ← Node 4: split interrupt nodes — image review, regen, pick, text review
 │   └── merge.py              ← Node 5: pure Python validation + JSON assembly
 │
 ├── prompts/
@@ -187,9 +187,9 @@ test_api.py                   ← End-to-end API test script (project root)
 4. Calls `interrupt()` — pauses the graph and sends the questions to the UI
 5. Resumes when the user submits their answers
 
-**LLM used:** Gemini Vision only (image inputs required — no Groq fallback).
+**LLM used:** Groq vision (`meta-llama/llama-4-scout-17b-16e-instruct`).
 
-**Only in:** Streamlit graph. Skipped in CLI.
+**Only in:** full pipeline graph. Skipped in CLI.
 
 **Interrupt payload:**
 
@@ -214,11 +214,11 @@ test_api.py                   ← End-to-end API test script (project root)
 
 **How it works:**
 
-1. Receives image path, budget, goal, and (in Streamlit) the user Q&A from state
+1. Receives image path, budget, goal, and (in the full pipeline) the user Q&A from state
 2. Formats the Q&A answers as a structured block and appends them to the prompt
-3. Calls **Gemini 2.5 Flash** (vision + text) to produce a JSON campaign plan
+3. Calls **Groq's vision model** (image + text) to produce a JSON campaign plan
 
-**LLM used:** Gemini Vision only — **no Groq fallback** (Groq does not support image inputs).
+**LLM used:** Groq vision (`meta-llama/llama-4-scout-17b-16e-instruct`).
 
 **Output — `campaign_plan`:**
 
@@ -246,7 +246,7 @@ test_api.py                   ← End-to-end API test script (project root)
 | Mode | What Happens |
 | --- | --- |
 | `use_original` | User's uploaded photo is base64-encoded and used directly as the ad image |
-| `enhance_with_ai` | User's uploaded photo is passed to Imagen's edit API as a visual reference; the model enhances it into an ad-ready image |
+| `enhance_with_ai` | User's uploaded photo is passed to the Gemini image model as a visual reference; the model enhances it into an ad-ready image |
 
 **How it works:**
 
@@ -254,13 +254,12 @@ test_api.py                   ← End-to-end API test script (project root)
 2. Calls `call_llm()` to generate copies, headlines, CTA, and a `visual_prompt` string
 3. Depending on `image_mode`:
    - `use_original`: reads and encodes the uploaded file directly
-   - `enhance_with_ai`: calls `enhance_ad_image(image_path, visual_prompt)` using Imagen's edit API; falls back to `generate_ad_images()` on error
+   - `enhance_with_ai`: calls `enhance_ad_image(image_path, visual_prompt)` using the Gemini image model; falls back to `generate_ad_images()` on error
 
-**LLM used for text:** Gemini 2.5 Flash — **with Groq fallback**.
+**LLM used for text:** Groq (`llama-3.3-70b-versatile`).
 
-**LLM used for images:**
-- Generation: Imagen 4 (`imagen-4.0-fast-generate-001`) via `google-genai` SDK
-- Enhancement: Imagen 3 edit (`imagen-3.0-capability-001`) via `google-genai` SDK
+**Model used for images (the only Gemini usage):**
+- Generation & enhancement: Gemini 3.1 Flash Image (`gemini-3.1-flash-image`) via the `google-genai` SDK
 
 **Output — `creative_output`:**
 
@@ -284,7 +283,7 @@ test_api.py                   ← End-to-end API test script (project root)
 
 **Role:** The "media buyer". Runs **in parallel** with `creative_node`. Decides how to spend the budget and who to target.
 
-**LLM used:** Gemini 2.5 Flash — **with Groq fallback**.
+**LLM used:** Groq (`llama-3.3-70b-versatile`).
 
 **Output — `media_output`:**
 
@@ -318,11 +317,28 @@ test_api.py                   ← End-to-end API test script (project root)
 
 ---
 
-### Node 4 — `review_node` (`nodes/review.py`)
+### Node 4 — review nodes (`nodes/review.py`)
 
-**Role:** Human-in-the-loop quality gate. Two sequential review phases using `interrupt()`.
+**Role:** Human-in-the-loop quality gate. Implemented as **four separate graph
+nodes** so that each image generation is its own checkpointed super-step:
 
-**Only in:** Streamlit graph. Not present in CLI.
+| Node | Interrupt? | Side effects |
+| --- | --- | --- |
+| `image_review_node` | yes (`image_review`) | none — just captures the decision and routes |
+| `image_regen_node` | no | regenerates the rejected image(s) **exactly once** |
+| `image_pick_node` | yes (`max_regenerations_exceeded`) | none — builds the picker from stored history |
+| `text_review_node` | yes (`text_review`) | none |
+
+> **Why split?** The old monolithic `review_node` ran a `while` loop with several
+> `interrupt()` calls and image generation *between* them. On every resume,
+> LangGraph re-executes the node from the top and **replays every prior
+> generation** — silently re-billing the image API and producing different
+> images, so the "pick from history" gallery showed freshly generated images
+> instead of the real ones. Moving generation into its own interrupt-free node
+> fixes that: a resume only re-runs the interrupting node (which has no side
+> effects), so a generation never repeats.
+
+**Only in:** full pipeline graph. Not present in CLI.
 
 **Phase 1 — Image Review:**
 
@@ -331,9 +347,9 @@ Behaviour depends on `image_mode`:
 | Mode | Behaviour |
 | --- | --- |
 | `use_original` | Shows the photo for confirmation only — no regeneration option (`can_regenerate: False`) |
-| `enhance_with_ai` | Shows the enhanced image with approve/feedback per image; rejected images are re-enhanced using the original photo + feedback; loops up to `MAX_REGENERATIONS_ALLOWED` times |
+| `enhance_with_ai` | Shows the enhanced image with approve/feedback; a rejection routes to `image_regen_node` which re-enhances using the original photo + feedback; loops up to `MAX_REGENERATIONS_ALLOWED` times |
 
-When regeneration limit is exceeded: sends a `max_regenerations_exceeded` interrupt showing all previously generated images — user picks one.
+When the regeneration limit is exceeded (or the user asks to "see all versions"): `image_pick_node` sends a `max_regenerations_exceeded` interrupt showing the original photo + every previously generated image — user picks one. **No new image is generated here.**
 
 **Phase 2 — Text Review (single interrupt):**
 
@@ -361,7 +377,7 @@ Resume with:    {"chosen_index": 0}
 
 **Role:** The "quality controller". Validates and fixes both sub-agent outputs, then assembles the final bundle.
 
-**Guard (Streamlit only):** If `review_stage` is set but not `"done"`, `merge_node` skips with `return {}`. The real merge runs only after `review_node` completes.
+**Guard (full pipeline only):** If `review_stage` is set but not `"done"`, `merge_node` skips with `return {}`. The real merge runs only after the review nodes complete.
 
 **What it validates and fixes:**
 
@@ -398,7 +414,7 @@ Resume with:    {"chosen_index": 0}
 
 ## FastAPI Backend (`api.py`)
 
-`api.py` exposes the full pipeline as a REST API with SSE streaming. It is the recommended interface for connecting a Next.js (or any other) frontend. Internally it drives the same LangGraph `streamlit_graph` that the Streamlit app uses — all nodes, interrupts, and checkpointing are identical.
+`api.py` exposes the full pipeline as a REST API with SSE streaming. It is the interface the Next.js frontend (`../web`) connects to. Internally it drives the LangGraph defined in `pipeline_graph.py` — all nodes, interrupts, and checkpointing live there.
 
 ### Starting the server
 
@@ -608,22 +624,21 @@ Four functions for different model types:
 
 ### `call_llm(prompt, system_prompt, node_name)` — Text generation
 
-Used by `creative_node` and `media_buying_node`.
+Used by `creative_node` and `media_buying_node`. Runs on Groq
+(`llama-3.3-70b-versatile`). Gemini is reserved exclusively for image
+generation, so there is no Gemini fallback for text.
 
 ```
-Try Gemini 2.5 Flash
-  ├── Success → return (text, "gemini")
-  └── ResourceExhausted (429) or ServiceUnavailable (503)
-        └── Try Groq llama-3.3-70b-versatile
-              ├── Success → return (text, "groq")
-              └── Failure → raise RuntimeError
+Call Groq llama-3.3-70b-versatile
+  ├── Success → return (text, "groq")
+  └── Failure → raise RuntimeError
 ```
-
-Primary provider is configurable via `PRIMARY_TEXT_LLM` env var (`gemini` or `groq`).
 
 ### `call_llm_vision(image_path, prompt, system_prompt)` — Image + text
 
-Used by `orchestrator_node` and `question_generator_node`. No Groq fallback (Groq is text-only).
+Used by `orchestrator_node` and `question_generator_node`. Runs on Groq's
+vision model (`meta-llama/llama-4-scout-17b-16e-instruct`); the image is
+downscaled and sent as a base64 data URL.
 
 ### `generate_ad_images(prompt, n)` — Image generation
 
@@ -674,10 +689,10 @@ goal                                                        errors
 
 | Field | Type | Set by | Purpose |
 | --- | --- | --- | --- |
-| `image_path` | `str` | app.py | Path to user-uploaded temp image file |
-| `image_mode` | `str` | app.py | `"use_original"` or `"enhance_with_ai"` |
-| `budget` | `float` | app.py | Total campaign budget in USD |
-| `goal` | `str` | app.py | Free-text campaign objective |
+| `image_path` | `str` | api.py (`/start`) | Path to user-uploaded temp image file |
+| `image_mode` | `str` | api.py (`/start`) | `"use_original"` or `"enhance_with_ai"` |
+| `budget` | `float` | api.py (`/start`) | Total campaign budget in USD |
+| `goal` | `str` | api.py (`/start`) | Free-text campaign objective |
 | `questions` | `list[str]` | question_generator_node | 4 product-specific questions |
 | `user_answers` | `dict` | question_generator_node | Answers keyed by index string |
 | `campaign_plan` | `dict` | orchestrator_node | Platform, objective, tone, etc. |
@@ -691,34 +706,23 @@ goal                                                        errors
 
 ---
 
-## Streamlit App (`app.py`)
+## Frontend (Next.js — `../web`)
 
-6-stage UI driven by `st.session_state["ui_stage"]`:
+The user-facing app is a conversational (chatbot) Next.js front-end in `../web`
+that drives this backend over HTTP + SSE. It decomposes the backend's coarse
+stages into fine conversational phases, but the **stage contract is the same**
+one the API exposes:
 
-| Stage | UI Shown | What Happens |
+| Backend stage | What the frontend shows | Resume call |
 | --- | --- | --- |
-| `setup` | File upload + image mode radio + budget + goal | Starts the graph |
-| `questions` | 4 generated questions with text inputs | Resumes graph with user answers |
-| `image_review` | Ad image with approve/feedback | Resumes graph; rejected images re-enhanced |
-| `max_regenerations_exceeded` | Gallery of all generated images | User picks one to proceed |
-| `text_review` | Copies, headlines, CTA with approve/feedback | Resumes; rejection loops to creative |
-| `done` | Full campaign bundle + ad preview + publish button | Publish to Meta |
+| `questions` | Generated questions, asked one at a time | `POST /session/{id}/answers` |
+| `image_review` | Ad image with approve / regenerate / "see all versions" | `POST /session/{id}/image-decision` |
+| `max_regenerations_exceeded` | Gallery of the original photo + every previously generated image | `POST /session/{id}/pick-image` |
+| `text_review` | Copies, headlines, CTA with approve / edit | `POST /session/{id}/text-decision` |
+| `done` | Full campaign bundle + ad preview + publish button | `POST /session/{id}/publish` |
 
-**Session state keys:**
-
-```python
-st.session_state = {
-    "thread_id":           str,   # UUID4 — identifies this run in MemorySaver
-    "ui_stage":            str,   # current stage name
-    "interrupt_data":      dict,  # payload from the latest interrupt
-    "image_path":          str,   # path to the uploaded image (temp file)
-    "final_state":         dict,  # final graph state after completion
-    "meta_publish_result": dict,  # result from Meta API / SimulatedMetaClient
-    "meta_publish_error":  str,   # error message if publish failed
-}
-```
-
-**Simulation mode banner:** When `META_SIMULATION_MODE=true`, a blue info banner appears on every page reminding you to connect real credentials before going live.
+Run it with `cd ../web && npm install && npm run dev` (configure
+`NEXT_PUBLIC_API_BASE` in `web/.env.local`). See `../web/README.md` for details.
 
 ---
 
@@ -749,14 +753,13 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMINI_API_KEY` | Google AI Studio key — used for Gemini Vision, text generation, and Imagen image generation |
+| `GROQ_API_KEY` | Groq API key — used for **all** text and vision→text generation |
+| `GEMINI_API_KEY` | Google AI Studio key — used **only** for ad image generation/enhancement |
 
 ### Optional (but recommended)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GROQ_API_KEY` | — | Groq API key — text fallback when Gemini hits rate limits |
-| `PRIMARY_TEXT_LLM` | `gemini` | Set to `groq` to make Groq the primary and Gemini the fallback |
 | `NUM_GENERATED_IMAGES` | `1` | Number of ad image variants to generate |
 | `MAX_REGENERATIONS_ALLOWED` | `2` | Max image re-enhancement retries in the review step |
 
@@ -803,15 +806,25 @@ Copy `.env.example` to `.env` and configure:
 
 ---
 
-## Running the Streamlit App
+## Running the Backend + Frontend
+
+Start the API:
 
 ```bash
-streamlit run app.py
+uvicorn api:app --reload --port 8000
 ```
 
-Open `http://localhost:8501` in your browser. The app guides you through all 6 stages.
+Then start the Next.js frontend in a second terminal:
 
-**Demo mode (default):** Works with just a Gemini API key. Meta publish will be simulated — no real API calls, no credentials needed.
+```bash
+cd ../web
+npm install
+npm run dev          # opens http://localhost:3000
+```
+
+The frontend guides you through every stage (Q&A → image review → copy review → publish).
+
+**Demo mode (default):** Meta publish is simulated — no Meta credentials needed (`META_SIMULATION_MODE=true`).
 
 **Live mode:** Set `META_SIMULATION_MODE=false` and fill in all Meta variables in `.env`.
 
@@ -848,28 +861,27 @@ All tests mock all LLM, image generation, and Meta API calls — **no API keys r
 
 | Test file | What It Covers |
 | --- | --- |
-| `test_nodes.py` | Core pipeline nodes: orchestrator, creative, media buying, merge, LLM fallback |
-| `test_new_nodes.py` | question_generator, review node (all approve/reject/regen paths), creative feedback redo |
+| `test_nodes.py` | Core pipeline nodes: orchestrator, creative, media buying, merge, Groq text |
+| `test_new_nodes.py` | question_generator, the split review nodes (route/regen/pick/text paths), creative feedback redo |
 | `test_meta_client.py` | SimulatedMetaClient returns correct structure; RealMetaClient calls SDK methods |
 
 ---
 
 ## Rate Limit Notes
 
-The Streamlit pipeline makes up to **5 LLM calls per run** (more on redo passes):
+The full pipeline makes up to **5 LLM calls per run** (more on redo passes):
 
 | Call | Provider | Notes |
 | --- | --- | --- |
-| `question_generator_node` | Gemini Vision | 1 call |
-| `orchestrator_node` | Gemini Vision | 1 call |
-| `creative_node` (text) | Gemini / Groq fallback | 1 call per run |
+| `question_generator_node` | Groq vision | 1 call |
+| `orchestrator_node` | Groq vision | 1 call |
+| `creative_node` (text) | Groq | 1 call per run |
 | `creative_node` (image) | Gemini 3.1 Flash Image | 1 call; only in `enhance_with_ai` mode |
-| `media_buying_node` | Gemini / Groq fallback | 1 call |
+| `media_buying_node` | Groq | 1 call |
 
 | Provider | Free Tier Limit | Behavior When Hit |
 | --- | --- | --- |
-| Gemini 2.5 Flash | ~15 RPM / 1,500 RPD | Triggers automatic Groq fallback |
-| Groq llama-3.3-70b | ~30 RPM | Raises `RuntimeError` |
+| Groq llama-3.3-70b / llama-4-scout | ~30 RPM | Raises `RuntimeError` |
 | Gemini 3.1 Flash Image | Billing-dependent | `generated_images` set to `[]`, pipeline continues |
 
 ---
@@ -880,29 +892,31 @@ The Streamlit pipeline makes up to **5 LLM calls per run** (more on redo passes)
 
 1. Create `nodes/my_node.py` with a `my_node(state: dict) -> dict` function
 2. Add prompt templates to `prompts/my_node.py`
-3. In `streamlit_graph.py`: `builder.add_node("my_node", my_node)` and wire edges
+3. In `pipeline_graph.py`: `builder.add_node("my_node", my_node)` and wire edges
 
 **Add a new review step:**
 
-1. Add a new `interrupt()` call inside `review_node`
-2. Add a new `elif stage == "my_stage":` renderer in `app.py` (Streamlit)
+1. Add a new interrupt-only node in `nodes/review.py` (keep any generation/side
+   effects in a separate interrupt-free node so resumes never replay them)
+2. Wire it into `pipeline_graph.py`
 3. Add a new `POST /session/{id}/my-decision` endpoint in `api.py` (FastAPI)
 4. Call `_assert_stage(session, "my_stage")` and `_advance(session, Command(resume=...))` inside it
+5. Handle the new stage in the Next.js frontend (`../web`)
 
 **Change the image generation model:**
 
 - Edit `llm_client.py` — update the `GEMINI_IMAGE_MODEL` constant
 
-**Change the LLM text model:**
+**Change the LLM text / vision model:**
 
-- Edit `llm_client.py` — update `GEMINI_MODEL` or `GROQ_MODEL` constants
+- Edit `llm_client.py` — update `GROQ_MODEL` or `GROQ_VISION_MODEL` constants
 
 **Add a new output field:**
 
 1. Return it from the relevant node
 2. Add it to `CampaignState` in `state.py`
 3. Include it in `campaign_bundle` inside `merge_node`
-4. Display it in `_stage_done()` in `app.py` and/or expose it via `GET /session/{id}/result` in `api.py`
+4. Expose it via `GET /session/{id}/result` in `api.py` and render it in the frontend
 
 **Switch to real Meta publishing:**
 

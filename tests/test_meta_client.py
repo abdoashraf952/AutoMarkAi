@@ -179,4 +179,6 @@ def test_cta_type_mapping_all_objectives():
             f"Objective {objective}: expected CTA {expected_cta}, got {actual_cta}"
         )
 
-    assert _CTA_TYPE == expected
+    # The legacy objectives must still be mapped (the table also carries the
+    # newer OUTCOME_* objectives, so check for inclusion rather than equality).
+    assert expected.items() <= _CTA_TYPE.items()

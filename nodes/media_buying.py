@@ -13,7 +13,7 @@ def media_buying_node(state: dict) -> dict:
     """
     Define the media buying strategy from campaign_plan.
 
-    Uses Gemini with Groq fallback. Picks locale-aware prompts (Arabic market
+    Uses Groq for text generation. Picks locale-aware prompts (Arabic market
     defaults differ: Egyptian locations, different platform split rules).
 
     State reads:  campaign_plan, budget, goal, language

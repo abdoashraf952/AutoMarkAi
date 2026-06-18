@@ -19,11 +19,12 @@ def merge_node(state: dict) -> dict:
     Validate creative_output and media_output, apply coherence fixes, and build campaign_bundle.
     No LLM calls — pure Python logic only.
 
-    Edit 3: Guard against premature execution. When review_node is still in progress
-            (media_buying_node finishes first), review_stage is set but not "done".
-            In that case, return {} and let the real merge happen after review completes.
+    Edit 3: Guard against premature execution. When the review nodes are still in
+            progress (media_buying_node finishes first), review_stage is set but not
+            "done". In that case, return {} and let the real merge happen after review
+            completes.
     """
-    # Edit 3: skip if the Streamlit review cycle hasn't completed yet
+    # Edit 3: skip if the human-in-the-loop review cycle hasn't completed yet
     review_stage = state.get("review_stage")
     if review_stage and review_stage != "done":
         logger.debug("merge_node: skipping — review_stage=%s", review_stage)

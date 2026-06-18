@@ -65,7 +65,16 @@ def creative_node(state: dict) -> dict:
         generated_images: list[str] = []
         img_errors: list[str] = []
 
-        if image_mode == "use_original":
+        # On a text-only redo pass (user asked to change the copy), reuse the
+        # previously approved image instead of regenerating a brand-new one.
+        prev_images = (state.get("creative_output") or {}).get("generated_images") or []
+        if creative_feedback and prev_images:
+            generated_images = list(prev_images)
+            logger.info(
+                "creative_node: redo pass — reusing %d existing image(s), skipping image regeneration",
+                len(generated_images),
+            )
+        elif image_mode == "use_original":
             if image_path:
                 try:
                     with open(image_path, "rb") as fh:

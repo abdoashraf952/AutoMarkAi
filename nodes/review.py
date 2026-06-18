@@ -1,5 +1,28 @@
-"""Review node — human-in-the-loop approval for generated images and ad copy."""
+"""Review nodes — human-in-the-loop approval for generated images and ad copy.
 
+These nodes used to live in a single `review_node` that ran a `while True` loop
+with several `interrupt()` calls and image-generation side effects *between*
+them. That is the classic LangGraph foot-gun: when the graph resumes from an
+interrupt the whole node re-executes from the top, replaying every previous
+`interrupt()` (which return their resolved values) **and re-running every side
+effect in between** — i.e. every prior image regeneration fires again. That
+silently re-bills the image API and produces brand-new (different) images, so
+the "pick from previously generated" picker ended up showing freshly generated
+images instead of the real history.
+
+The fix splits the flow into four nodes wired through the graph:
+
+    creative_node ─▶ image_review_node ─┬─(to_text)──▶ text_review_node
+                                        ├─(to_regen)─▶ image_regen_node ─▶ (loop back)
+                                        └─(to_pick)──▶ image_pick_node ──▶ text_review_node
+
+Each image generation now happens inside `image_regen_node`, which contains no
+interrupt — so it runs exactly once per super-step and its result is committed
+to the checkpoint. Resuming an interrupt only re-runs the *interrupting* node
+(which has no side effects), so a generation is never replayed.
+"""
+
+import base64
 import logging
 import os
 
@@ -13,44 +36,57 @@ logger = logging.getLogger(__name__)
 MAX_REGENERATIONS_ALLOWED = int(os.getenv("MAX_REGENERATIONS_ALLOWED", "2"))
 
 
-def review_node(state: dict) -> dict:
+def _build_choices(image_path: str, image_history: list[str]) -> tuple[list[str], bool]:
+    """Build the pick-from-history gallery: the user's ORIGINAL photo first
+    (if available), followed by every previously generated image. No new
+    images are ever generated here.
+
+    Returns (choices, has_original).
     """
-    Two-phase human review using LangGraph interrupt().
+    choices: list[str] = list(image_history)
+    original_b64: str | None = None
+    if image_path:
+        try:
+            with open(image_path, "rb") as fh:
+                original_b64 = base64.b64encode(fh.read()).decode("utf-8")
+        except OSError as e:
+            logger.warning("review: could not read original image for picker: %s", e)
+    if original_b64:
+        choices = [original_b64] + choices
+    return choices, bool(original_b64)
 
-    Phase 1 — Image review (loops until approved or max regenerations exceeded):
-        Interrupt payload: {"stage": "image_review", "images": [...],
-                            "regen_count": int, "max_regens": int}
-        Resume payload:    {"approved": [bool, ...], "feedback": {int|str: str}}
 
-        If user rejects and regen_count < MAX_REGENERATIONS_ALLOWED:
-            Regenerate rejected images, increment counter, loop.
-        If user rejects and regen_count >= MAX_REGENERATIONS_ALLOWED:
-            Interrupt with stage "max_regenerations_exceeded" showing all
-            previously generated images. User picks one or is told to wait 5h.
-            Resume payload: {"chosen_index": int}
+# ------------------------------------------------------------------ #
+# Phase 1a: Image review — interrupt only, no image generation        #
+# ------------------------------------------------------------------ #
+def image_review_node(state: dict) -> dict:
+    """Show the current ad image and capture the user's decision.
 
-    Phase 2 — Text review (single interrupt):
-        Interrupt payload: {"stage": "text_review",
-                            "copies": [...], "headlines": [...], "cta": str}
-        Resume payload:    {"approved": bool, "feedback": str}
-        If rejected → returns review_stage="redo_creative" so the graph loops
-                       back to creative_node with the feedback in state.
-        If approved → returns review_stage="done" so merge_node runs.
+    Contains a single `interrupt()` and **no** image-generation side effects,
+    so it is safe to replay on resume. It only decides where to route next:
 
-    State reads:  creative_output (generated_images, visual_prompt, copies, headlines, cta)
-    State writes: creative_output (updated images), feedback, review_stage
+        - "to_text"  → approved (or use_original / text-only redo): go to copy review
+        - "to_regen" → user rejected and regenerations remain: go regenerate
+        - "to_pick"  → regenerations exhausted (or explicit "show me all"): go pick
+
+    Interrupt payload: {"stage": "image_review", "images": [...],
+                        "regen_count": int, "max_regens": int, "can_regenerate": bool}
+    Resume payload:    {"approved": [bool, ...], "feedback": {int|str: str}}
+                       or {"action": "pick_from_history"}
     """
     creative = dict(state.get("creative_output") or {})
     images: list[str] = list(creative.get("generated_images") or [])
-    visual_prompt: str = creative.get("visual_prompt", "")
     image_mode: str = state.get("image_mode", "use_original")
-    image_path: str = state.get("image_path", "")
 
-    # ------------------------------------------------------------------ #
-    # Phase 1: Image review                                                #
-    # ------------------------------------------------------------------ #
+    # On a text-only redo pass the image was already approved and reused, so
+    # skip image review entirely and jump straight to text review.
+    is_redo = bool((state.get("feedback") or {}).get("creative"))
+    if is_redo:
+        logger.info("image_review_node: redo pass — skipping image review")
+        return {"review_route": "to_text"}
+
     if image_mode == "use_original":
-        # User chose their own photo — show it for confirmation, no regeneration
+        # User chose their own photo — confirm it, never regenerate.
         interrupt({
             "stage": "image_review",
             "images": images,
@@ -58,68 +94,157 @@ def review_node(state: dict) -> dict:
             "max_regens": 0,
             "can_regenerate": False,
         })
-        # Accept images as-is regardless of approval value
-    else:
-        # "enhance_with_ai" mode — allow regeneration using the original photo as reference
-        image_history: list[str] = list(images)
-        regen_count = 0
+        creative["generated_images"] = images
+        return {"review_route": "to_text", "creative_output": creative}
 
-        while True:
-            result = interrupt({
-                "stage": "image_review",
-                "images": images,
-                "regen_count": regen_count,
-                "max_regens": MAX_REGENERATIONS_ALLOWED,
-                "can_regenerate": True,
-            })
+    # "enhance_with_ai" mode — regeneration is allowed.
+    # Seed the history with the first generated image(s) the first time through.
+    image_history: list[str] = list(state.get("image_history") or images)
+    regen_count: int = state.get("regen_count", 0)
 
-            approved_list: list[bool] = result.get("approved", [True] * len(images))
-            img_feedback: dict = result.get("feedback", {})
+    result = interrupt({
+        "stage": "image_review",
+        "images": images,
+        "regen_count": regen_count,
+        "max_regens": MAX_REGENERATIONS_ALLOWED,
+        "can_regenerate": True,
+    })
 
-            if all(approved_list):
-                break
+    explicit_pick = result.get("action") == "pick_from_history"
+    approved_list: list[bool] = result.get("approved", [True] * len(images))
+    img_feedback: dict = result.get("feedback", {})
 
-            if regen_count >= MAX_REGENERATIONS_ALLOWED:
-                pick_result = interrupt({
-                    "stage": "max_regenerations_exceeded",
-                    "image_history": image_history,
-                    "message": (
-                        f"Maximum regenerations ({MAX_REGENERATIONS_ALLOWED}) exceeded. "
-                        "You can choose one of the previously generated images below, "
-                        "or try again after 5 hours."
-                    ),
-                })
-                chosen_index = pick_result.get("chosen_index", 0)
-                chosen_index = max(0, min(chosen_index, len(image_history) - 1))
-                images = [image_history[chosen_index]]
-                break
+    if not explicit_pick and approved_list and all(approved_list):
+        # Approved as-is → commit and move on to text review.
+        creative["generated_images"] = images
+        return {
+            "review_route": "to_text",
+            "creative_output": creative,
+            "image_history": image_history,
+            "regen_count": regen_count,
+        }
 
-            for idx, approved in enumerate(approved_list):
-                if not approved:
-                    fb = img_feedback.get(idx, img_feedback.get(str(idx), ""))
-                    regen_prompt = visual_prompt
-                    if fb:
-                        regen_prompt = f"{visual_prompt}. Additional instruction: {fb}"
-                    try:
-                        if image_path:
-                            new_images = enhance_ad_image(image_path, regen_prompt, n=1)
-                        else:
-                            new_images = generate_ad_images(regen_prompt, n=1)
-                        if new_images and idx < len(images):
-                            images[idx] = new_images[0]
-                            image_history.append(new_images[0])
-                            logger.info("review_node: re-enhanced image %d", idx)
-                    except RuntimeError as e:
-                        logger.warning("review_node: regen failed for image %d: %s", idx, e)
+    if explicit_pick or regen_count >= MAX_REGENERATIONS_ALLOWED:
+        # No more regenerations — show the picker (history + original). This is
+        # the path that used to silently regenerate; it now NEVER does.
+        return {
+            "review_route": "to_pick",
+            "image_history": image_history,
+            "regen_count": regen_count,
+        }
 
-            regen_count += 1
+    # Otherwise regenerate the rejected image(s) in a dedicated node.
+    regen_indices = [i for i, ok in enumerate(approved_list) if not ok]
+    if not regen_indices:
+        regen_indices = [0]
+    return {
+        "review_route": "to_regen",
+        "image_history": image_history,
+        "regen_count": regen_count,
+        "regen_indices": regen_indices,
+        "image_regen_feedback": img_feedback,
+    }
 
-    # Commit approved (and any regenerated) images back to creative_output
+
+# ------------------------------------------------------------------ #
+# Phase 1b: Image regeneration — side effect node, no interrupt       #
+# ------------------------------------------------------------------ #
+def image_regen_node(state: dict) -> dict:
+    """Regenerate the rejected image(s) exactly once.
+
+    This is the only place image generation happens during review, and it has
+    no `interrupt()`, so its (costly) output is committed to the checkpoint and
+    never replayed. It then loops back to `image_review_node`.
+    """
+    creative = dict(state.get("creative_output") or {})
+    images: list[str] = list(creative.get("generated_images") or [])
+    visual_prompt: str = creative.get("visual_prompt", "")
+    image_path: str = state.get("image_path", "")
+    image_history: list[str] = list(state.get("image_history") or images)
+    regen_count: int = state.get("regen_count", 0)
+    regen_indices: list[int] = state.get("regen_indices") or [0]
+    img_feedback: dict = state.get("image_regen_feedback") or {}
+
+    for idx in regen_indices:
+        if idx >= len(images):
+            continue
+        fb = img_feedback.get(idx, img_feedback.get(str(idx), ""))
+        regen_prompt = visual_prompt
+        if fb:
+            regen_prompt = f"{visual_prompt}. Additional instruction: {fb}"
+        try:
+            if image_path:
+                new_images = enhance_ad_image(image_path, regen_prompt, n=1)
+            else:
+                new_images = generate_ad_images(regen_prompt, n=1)
+            if new_images:
+                images[idx] = new_images[0]
+                image_history.append(new_images[0])
+                logger.info("image_regen_node: re-enhanced image %d", idx)
+        except RuntimeError as e:
+            logger.warning("image_regen_node: regen failed for image %d: %s", idx, e)
+
     creative["generated_images"] = images
+    return {
+        "creative_output": creative,
+        "image_history": image_history,
+        "regen_count": regen_count + 1,
+    }
 
-    # ------------------------------------------------------------------ #
-    # Phase 2: Text review — single interrupt                              #
-    # ------------------------------------------------------------------ #
+
+# ------------------------------------------------------------------ #
+# Phase 1c: Pick from history — interrupt only, no generation         #
+# ------------------------------------------------------------------ #
+def image_pick_node(state: dict) -> dict:
+    """Let the user pick one of the images we've already produced.
+
+    Builds the gallery from the REAL stored history (original photo first, then
+    every previously generated image) and never calls the image API. Safe to
+    replay on resume.
+
+    Interrupt payload: {"stage": "max_regenerations_exceeded",
+                        "image_history": [...], "has_original": bool, "message": str}
+    Resume payload:    {"chosen_index": int}
+    """
+    creative = dict(state.get("creative_output") or {})
+    image_history: list[str] = list(state.get("image_history") or [])
+    image_path: str = state.get("image_path", "")
+
+    choices, has_original = _build_choices(image_path, image_history)
+    pick_result = interrupt({
+        "stage": "max_regenerations_exceeded",
+        "image_history": choices,
+        "has_original": has_original,
+        "message": (
+            "Here are all the versions we've created"
+            + (" (your original photo is first)" if has_original else "")
+            + " — pick the one you'd like to use."
+        ),
+    })
+
+    chosen_index = pick_result.get("chosen_index", 0)
+    chosen_index = max(0, min(chosen_index, len(choices) - 1)) if choices else 0
+    if choices:
+        creative["generated_images"] = [choices[chosen_index]]
+
+    return {"review_route": "to_text", "creative_output": creative}
+
+
+# ------------------------------------------------------------------ #
+# Phase 2: Text review — single interrupt                             #
+# ------------------------------------------------------------------ #
+def text_review_node(state: dict) -> dict:
+    """Approve or request changes to the ad copy.
+
+    Interrupt payload: {"stage": "text_review", "copies": [...],
+                        "headlines": [...], "cta": str}
+    Resume payload:    {"approved": bool, "feedback": str}
+
+    If approved  → review_stage="done"          (graph → merge_node)
+    If rejected  → review_stage="redo_creative" (graph → creative_node, copy only)
+    """
+    creative = dict(state.get("creative_output") or {})
+
     text_result = interrupt({
         "stage": "text_review",
         "copies": creative.get("copies", []),
@@ -136,9 +261,8 @@ def review_node(state: dict) -> dict:
             "review_stage": "done",
             "feedback": {},
         }
-    else:
-        return {
-            "creative_output": creative,
-            "review_stage": "redo_creative",
-            "feedback": {"creative": text_feedback},
-        }
+    return {
+        "creative_output": creative,
+        "review_stage": "redo_creative",
+        "feedback": {"creative": text_feedback},
+    }
