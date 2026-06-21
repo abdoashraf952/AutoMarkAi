@@ -33,6 +33,7 @@ def merge_node(state: dict) -> dict:
     errors = list(state.get("errors") or [])
     creative = dict(state.get("creative_output") or {})
     media = dict(state.get("media_output") or {})
+    strategy = dict(state.get("strategy_output") or {})
     plan = state.get("campaign_plan") or {}
 
     # --- Validate copies (3 required, max 125 chars each) ---
@@ -72,6 +73,25 @@ def merge_node(state: dict) -> dict:
             errors.append(warning)
             media["budget_split"] = {k: round(v / total, 4) for k, v in split.items()}
 
+    # --- Audience override (Strategist is the source of truth for "who") ---
+    persona = strategy.get("target_persona") or {}
+    if persona:
+        audience = dict(media.get("audience") or {})
+        if persona.get("age_min") is not None:
+            audience["age_min"] = persona["age_min"]
+        if persona.get("age_max") is not None:
+            audience["age_max"] = persona["age_max"]
+        gender = persona.get("gender")
+        if gender in ("male", "female"):
+            audience["genders"] = [gender]
+        elif gender == "all":
+            audience["genders"] = ["all"]
+        if persona.get("interests"):
+            audience["interests"] = persona["interests"]
+        if persona.get("locations") and not audience.get("locations"):
+            audience["locations"] = persona["locations"]
+        media["audience"] = audience
+
     # --- Assemble campaign_bundle ---
     campaign_bundle = {
         "meta": {
@@ -104,6 +124,16 @@ def merge_node(state: dict) -> dict:
             "optimization_goal": media.get("optimization_goal", ""),
             "estimated_reach": media.get("estimated_reach", {}),
             "reasoning": media.get("reasoning", ""),
+        },
+        "strategy": {
+            "target_persona": strategy.get("target_persona", {}),
+            "channels": strategy.get("channels", {}),
+            "timezone": strategy.get("timezone", ""),
+            "timezone_offset": strategy.get("timezone_offset", ""),
+            "schedule": strategy.get("schedule", {}),
+            "cadence": strategy.get("cadence", {}),
+            "messaging_angles": strategy.get("messaging_angles", []),
+            "rationale": strategy.get("rationale", ""),
         },
     }
 

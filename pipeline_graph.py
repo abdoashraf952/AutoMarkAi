@@ -19,14 +19,20 @@ from nodes.review import (
     image_review_node,
     text_review_node,
 )
+from nodes.strategy import strategy_node
 from state import CampaignState
 
 
+def _route_after_orchestrator(state: CampaignState):
+    """After orchestrator: run the Strategist if we have a plan, else short-circuit."""
+    if not state.get("campaign_plan"):
+        return "merge_node"
+    return "strategy_node"
+
+
 def _route_to_subagents(state: CampaignState):
-    """Fan-out to creative and media branches after orchestrator."""
-    if not state.get("campaign_plan") or (
-        state.get("errors") and not state.get("campaign_plan")
-    ):
+    """Fan-out to creative and media branches after the Strategist."""
+    if not state.get("campaign_plan"):
         return "merge_node"
     return [
         Send("creative_node", dict(state)),
@@ -59,6 +65,7 @@ def get_pipeline_graph():
         START
           -> question_generator_node   [interrupt: questions]
           -> orchestrator_node
+          -> strategy_node             [persona + channels + dayparting]
           -> fan-out (Send):
                creative_node           [LLM text + Gemini images]
                media_buying_node       [budget + audience]
@@ -80,6 +87,7 @@ def get_pipeline_graph():
 
     builder.add_node("question_generator_node", question_generator_node)
     builder.add_node("orchestrator_node", orchestrator_node)
+    builder.add_node("strategy_node", strategy_node)
     builder.add_node("creative_node", creative_node)
     builder.add_node("media_buying_node", media_buying_node)
     builder.add_node("image_review_node", image_review_node)
@@ -91,8 +99,14 @@ def get_pipeline_graph():
     builder.set_entry_point("question_generator_node")
     builder.add_edge("question_generator_node", "orchestrator_node")
 
+    # orchestrator -> strategy_node -> fan-out (so creative/media can use the persona)
     builder.add_conditional_edges(
         "orchestrator_node",
+        _route_after_orchestrator,
+        ["strategy_node", "merge_node"],
+    )
+    builder.add_conditional_edges(
+        "strategy_node",
         _route_to_subagents,
         ["creative_node", "media_buying_node", "merge_node"],
     )

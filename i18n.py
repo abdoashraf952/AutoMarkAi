@@ -77,6 +77,12 @@ def get_media_buying_prompts(language: str = DEFAULT_LANGUAGE) -> tuple[str, str
     return mod.SYSTEM, mod.USER_TEMPLATE
 
 
+def get_strategy_prompts(language: str = DEFAULT_LANGUAGE) -> tuple[str, str]:
+    """Return (SYSTEM, USER_TEMPLATE) for the strategy (Strategist) node."""
+    mod = _load("strategy", language)
+    return mod.SYSTEM, mod.USER_TEMPLATE
+
+
 def get_strings(language: str = DEFAULT_LANGUAGE) -> object:
     """Return the strings module for the given language."""
     return _load("strings", language)

@@ -11,3 +11,5 @@ python-multipart>=0.0.9
 facebook-business>=3.0.0
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
+# Optional: only needed when ENABLE_WEB_SEARCH=true (Strategist live-trends tool)
+ddgs>=6.0.0

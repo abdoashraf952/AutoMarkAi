@@ -25,6 +25,13 @@ class CampaignState(TypedDict, total=False):
     # --- orchestrator output ---
     campaign_plan: dict
 
+    # --- strategy agent output (Strategist) ---
+    # Customized marketing plan: target_persona, channels, schedule (dayparting),
+    # cadence, messaging_angles, rationale. Produced before the fan-out so creative
+    # and media_buying can consume it; merge_node folds it into the bundle and uses
+    # target_persona as the source of truth for audience targeting.
+    strategy_output: dict
+
     # --- sub-agent outputs ---
     # creative_output now includes generated_images: list[str] (Edit 1)
     creative_output: dict

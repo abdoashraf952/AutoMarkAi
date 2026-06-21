@@ -7,6 +7,7 @@ import os
 
 from llm_client import _parse_json_with_retry, call_llm, enhance_ad_image, generate_ad_images
 from i18n import get_creative_prompts
+from strategy_tools import build_strategy_context
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,12 @@ def creative_node(state: dict) -> dict:
             goal=state["goal"],
             feedback_context=feedback_context,
         )
+
+        # Lead with the Strategist's persona + messaging angles when available,
+        # so the copy speaks directly to the right audience.
+        strategy_context = build_strategy_context(state.get("strategy_output"), language)
+        if strategy_context:
+            prompt = f"{strategy_context}\n\n{prompt}"
 
         raw, provider = call_llm(prompt, system, "creative", allow_fallback=True)
         creative_output = _parse_json_with_retry(raw)

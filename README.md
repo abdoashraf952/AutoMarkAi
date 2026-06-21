@@ -48,17 +48,27 @@ User Input (image + budget + goal + image_mode)
         ▼
 ┌──────────────────────────────────────────────────────────────┐
 │               question_generator_node                         │
-│  • Analyzes product image + goal with Gemini Vision           │
-│  • Generates 4 product-specific questions                     │
+│  • Analyzes product image + goal with Groq Vision             │
+│  • Generates product-specific questions                       │
 │  • INTERRUPT → waits for user answers                         │
 └──────────────────────┬───────────────────────────────────────┘
                        │  (answers appended to orchestrator prompt)
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                   orchestrator_node                           │
-│  • Analyzes image with Gemini Vision + Q&A context            │
+│  • Analyzes image with Groq Vision + Q&A context             │
 │  • Decides platform, objective, tone, target audience         │
 │  • Produces: campaign_plan                                    │
+└──────────────────────┬───────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    strategy_node  (Strategist)               │
+│  • Builds target persona + channel selection                  │
+│  • Computes dayparting peak windows (audience timezone)       │
+│  • Produces messaging angles → feeds creative & media         │
+│  • Tools: dayparting KB, timezone resolver, Meta formatter,   │
+│    optional web search (ENABLE_WEB_SEARCH)                     │
 └──────────────────────┬───────────────────────────────────────┘
                        │
           ┌────────────┴────────────┐
@@ -138,11 +148,13 @@ AutoMarkAi/
 ├── pipeline_graph.py         ← Full graph — MemorySaver, all nodes (used by api.py)
 ├── state.py                  ← Shared state schema (TypedDict)
 ├── llm_client.py             ← LLM abstraction — Groq for all text/vision, Gemini for image gen
+├── strategy_tools.py         ← Deterministic Strategist tools (dayparting KB, timezone, Meta schedule, web search)
 ├── meta_client.py            ← Meta Marketing API client (simulated + real)
 │
 ├── nodes/
 │   ├── question_generator.py ← Node 0: vision → questions + interrupt for answers
 │   ├── orchestrator.py       ← Node 1: vision + Q&A context → campaign_plan
+│   ├── strategy.py           ← Node 1.5: persona + channels + dayparting (Strategist)
 │   ├── creative.py           ← Node 2: text + image sourcing (original or Gemini image edit)
 │   ├── media_buying.py       ← Node 3: text → budget, audience, placements
 │   ├── review.py             ← Node 4: split interrupt nodes — image review, regen, pick, text review
@@ -869,12 +881,13 @@ All tests mock all LLM, image generation, and Meta API calls — **no API keys r
 
 ## Rate Limit Notes
 
-The full pipeline makes up to **5 LLM calls per run** (more on redo passes):
+The full pipeline makes up to **6 LLM calls per run** (more on redo passes):
 
 | Call | Provider | Notes |
 | --- | --- | --- |
 | `question_generator_node` | Groq vision | 1 call |
 | `orchestrator_node` | Groq vision | 1 call |
+| `strategy_node` | Groq (+ optional web search) | 1 call |
 | `creative_node` (text) | Groq | 1 call per run |
 | `creative_node` (image) | Gemini 3.1 Flash Image | 1 call; only in `enhance_with_ai` mode |
 | `media_buying_node` | Groq | 1 call |
