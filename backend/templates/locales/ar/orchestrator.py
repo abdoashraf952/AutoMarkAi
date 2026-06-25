@@ -3,7 +3,7 @@ Internal JSON schema values remain in English for programmatic use.
 The user_answers may be in Arabic; Gemini handles them correctly.
 """
 
-from templates.locales.en.orchestrator import _BASE_SCHEMA, _PLATFORM_RULE, _OBJECTIVE_RULE
+from AutoMarkAi.backend.templates.locales.en.orchestrator import _BASE_SCHEMA, _PLATFORM_RULE, _OBJECTIVE_RULE
 
 _AR_PLATFORM_RULE = (
     "- platform: instagram → منتجات lifestyle/فاشون/فود/جمال/تكنولوجيا; "

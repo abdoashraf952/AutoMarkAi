@@ -2,8 +2,8 @@
 
 import logging
 
-from llm_client import _parse_json_with_retry, call_llm_vision
-from i18n import get_orchestrator_prompts
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm_vision
+from AutoMarkAi.backend.i18n import get_orchestrator_prompts
 
 logger = logging.getLogger(__name__)
 

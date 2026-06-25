@@ -1,6 +1,6 @@
 """Arabic media buying prompts — same logic as English, Arabic-market defaults."""
 
-from templates.locales.en.media_buying import USER_TEMPLATE  # noqa: F401 — identical template
+from AutoMarkAi.backend.templates.locales.en.media_buying import USER_TEMPLATE  # noqa: F401 — identical template
 
 SYSTEM = (
     "You are a performance media buyer specialising in Meta ads for Egyptian and Arab markets.\n"

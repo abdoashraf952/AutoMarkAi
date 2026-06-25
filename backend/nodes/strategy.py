@@ -13,9 +13,9 @@ import json
 import logging
 from datetime import date
 
-from llm_client import _parse_json_with_retry, call_llm
-from i18n import get_strategy_prompts
-from strategy_tools import (
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm
+from AutoMarkAi.backend.i18n import get_strategy_prompts
+from AutoMarkAi.backend.strategy_tools import (
     build_search_query,
     finalize_schedule,
     format_web_context,

@@ -30,7 +30,7 @@ def main() -> None:
         print(f"ERROR: Image not found: {args.image}", file=sys.stderr)
         sys.exit(1)
 
-    from graph import get_graph  # deferred so dotenv loads before graph imports llm_client
+    from AutoMarkAi.backend.graph import get_graph  # deferred so dotenv loads before graph imports llm_client
 
     graph = get_graph()
 

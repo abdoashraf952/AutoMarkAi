@@ -39,7 +39,7 @@ _graph = None
 def _get_graph():
     global _graph
     if _graph is None:
-        from pipeline_graph import get_pipeline_graph
+        from AutoMarkAi.backend.pipeline_graph import get_pipeline_graph
         _graph = get_pipeline_graph()
     return _graph
 
@@ -392,7 +392,7 @@ async def publish(session_id: str, body: PublishBody = PublishBody()):
     if not bundle:
         raise HTTPException(400, "No campaign bundle found — pipeline may not have completed")
 
-    from meta_client import get_meta_client
+    from AutoMarkAi.backend.meta_client import get_meta_client
     load_dotenv(override=True)
     client = get_meta_client()
     sim = os.getenv("META_SIMULATION_MODE", "true").lower() == "true"

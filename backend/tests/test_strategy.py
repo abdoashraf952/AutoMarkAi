@@ -41,8 +41,8 @@ _MOCK_STRATEGY = {
 
 def test_strategy_node_produces_finalized_plan():
     """strategy_node returns persona + a finalized schedule (timezone, Meta format, start_time)."""
-    import nodes.strategy
-    from nodes.strategy import strategy_node
+    import AutoMarkAi.backend.nodes.strategy
+    from AutoMarkAi.backend.nodes.strategy import strategy_node
 
     state = {
         "campaign_plan": {
@@ -74,7 +74,7 @@ def test_strategy_node_produces_finalized_plan():
 
 def test_strategy_node_graceful_on_llm_failure():
     """A bad LLM response must not crash the pipeline — returns empty strategy + error."""
-    from nodes.strategy import strategy_node
+    from AutoMarkAi.backend.nodes.strategy import strategy_node
 
     with patch.dict(os.environ, {"ENABLE_WEB_SEARCH": "false"}):
         with patch("nodes.strategy.call_llm", return_value=("not json", "groq")):
@@ -89,7 +89,7 @@ def test_strategy_node_graceful_on_llm_failure():
 # ---------------------------------------------------------------------------
 
 def test_to_meta_adset_schedule_splits_cross_midnight():
-    from strategy_tools import to_meta_adset_schedule
+    from AutoMarkAi.backend.strategy_tools import to_meta_adset_schedule
 
     entries = to_meta_adset_schedule(
         [{"days": ["Sun", "Mon"], "start": "22:30", "end": "01:30"}]
@@ -100,7 +100,7 @@ def test_to_meta_adset_schedule_splits_cross_midnight():
 
 
 def test_to_meta_adset_schedule_normal_window():
-    from strategy_tools import to_meta_adset_schedule
+    from AutoMarkAi.backend.strategy_tools import to_meta_adset_schedule
 
     entries = to_meta_adset_schedule([{"days": ["Fri", "Sat"], "start": "11:00", "end": "13:00"}])
     assert entries == [
@@ -109,7 +109,7 @@ def test_to_meta_adset_schedule_normal_window():
 
 
 def test_resolve_timezone_from_locations_and_locale():
-    from strategy_tools import resolve_timezone
+    from AutoMarkAi.backend.strategy_tools import resolve_timezone
 
     assert resolve_timezone(["SA"], "en") == ("Asia/Riyadh", "+03:00")
     assert resolve_timezone([], "ar") == ("Africa/Cairo", "+02:00")
@@ -117,7 +117,7 @@ def test_resolve_timezone_from_locations_and_locale():
 
 
 def test_web_search_disabled_returns_empty():
-    from strategy_tools import web_search
+    from AutoMarkAi.backend.strategy_tools import web_search
 
     with patch.dict(os.environ, {"ENABLE_WEB_SEARCH": "false"}):
         assert web_search("anything") == []
@@ -129,9 +129,9 @@ def test_web_search_disabled_returns_empty():
 
 def test_merge_overrides_audience_with_persona():
     import importlib
-    import nodes.merge
-    importlib.reload(nodes.merge)
-    from nodes.merge import merge_node
+    import AutoMarkAi.backend.nodes.merge
+    importlib.reload(AutoMarkAi.backend.nodes.merge)
+    from AutoMarkAi.backend.nodes.merge import merge_node
 
     state = {
         "review_stage": "done",

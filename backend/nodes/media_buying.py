@@ -3,9 +3,9 @@
 import json
 import logging
 
-from llm_client import _parse_json_with_retry, call_llm
-from i18n import get_media_buying_prompts
-from strategy_tools import build_strategy_context
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm
+from AutoMarkAi.backend.i18n import get_media_buying_prompts
+from AutoMarkAi.backend.strategy_tools import build_strategy_context
 
 logger = logging.getLogger(__name__)
 

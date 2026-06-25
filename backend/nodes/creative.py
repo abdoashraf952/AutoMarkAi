@@ -5,9 +5,9 @@ import json
 import logging
 import os
 
-from llm_client import _parse_json_with_retry, call_llm, enhance_ad_image, generate_ad_images
-from i18n import get_creative_prompts
-from strategy_tools import build_strategy_context
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm, enhance_ad_image, generate_ad_images
+from AutoMarkAi.backend.i18n import get_creative_prompts
+from AutoMarkAi.backend.strategy_tools import build_strategy_context
 
 logger = logging.getLogger(__name__)
 

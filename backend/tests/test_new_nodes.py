@@ -18,7 +18,7 @@ def test_question_gen_node_generates_single_question():
     """question_gen_node returns exactly one new question, parsed from JSON."""
     with patch("nodes.question_generator.call_llm_vision",
                return_value=json.dumps({"question": "Who is your ideal buyer?"})):
-        from nodes.question_generator import question_gen_node
+        from AutoMarkAi.backend.nodes.question_generator import question_gen_node
         result = question_gen_node({
             "image_path": "tests/sample_input/watch.jpg",
             "goal": "get WhatsApp leads",
@@ -38,7 +38,7 @@ def test_question_gen_node_uses_prior_qa_context():
         return json.dumps({"question": "What's your busiest season?"})
 
     with patch("nodes.question_generator.call_llm_vision", side_effect=capture):
-        from nodes.question_generator import question_gen_node
+        from AutoMarkAi.backend.nodes.question_generator import question_gen_node
         result = question_gen_node({
             "image_path": "tests/sample_input/watch.jpg",
             "goal": "drive sales",
@@ -54,7 +54,7 @@ def test_question_gen_node_falls_back_on_failure():
     """If the vision call fails, gen_node uses the index-aligned fallback question."""
     with patch("nodes.question_generator.call_llm_vision",
                side_effect=RuntimeError("vision down")):
-        from nodes.question_generator import question_gen_node
+        from AutoMarkAi.backend.nodes.question_generator import question_gen_node
         result = question_gen_node({
             "image_path": "tests/sample_input/watch.jpg",
             "goal": "drive traffic",
@@ -68,7 +68,7 @@ def test_question_gen_node_falls_back_on_failure():
 
 def test_question_ask_node_stores_answer_and_routes():
     """question_ask_node stores the answer; route_after_answer loops until NUM_QUESTIONS."""
-    import nodes.question_generator as qg
+    import AutoMarkAi.backend.nodes.question_generator as qg
 
     with patch("nodes.question_generator.interrupt", return_value={"answer": "A1"}):
         result = qg.question_ask_node({"questions": ["Q1?"], "user_answers": {}})
@@ -88,9 +88,9 @@ def test_question_ask_node_stores_answer_and_routes():
 def test_creative_node_image_generation_failure_is_graceful():
     """If image generation fails, creative_node still returns successfully with empty generated_images."""
     import importlib
-    import nodes.creative
-    importlib.reload(nodes.creative)
-    from nodes.creative import creative_node
+    import AutoMarkAi.backend.nodes.creative
+    importlib.reload(AutoMarkAi.backend.nodes.creative)
+    from AutoMarkAi.backend.nodes.creative import creative_node
 
     mock_creative = {
         "copies": ["C1", "C2", "C3"],
@@ -128,9 +128,9 @@ def test_creative_node_image_generation_failure_is_graceful():
 def test_creative_node_uses_feedback_in_prompt():
     """creative_node must append feedback text to the LLM prompt when state has creative feedback."""
     import importlib
-    import nodes.creative
-    importlib.reload(nodes.creative)
-    from nodes.creative import creative_node
+    import AutoMarkAi.backend.nodes.creative
+    importlib.reload(AutoMarkAi.backend.nodes.creative)
+    from AutoMarkAi.backend.nodes.creative import creative_node
 
     mock_creative = {
         "copies": ["C1", "C2", "C3"],
@@ -174,9 +174,9 @@ def test_creative_node_uses_feedback_in_prompt():
 def test_text_review_selects_copy_and_headline():
     """Choosing copy #1 and headline #2 makes them the primary creative; always done."""
     import importlib
-    import nodes.review
-    importlib.reload(nodes.review)
-    from nodes.review import text_review_node
+    import AutoMarkAi.backend.nodes.review
+    importlib.reload(AutoMarkAi.backend.nodes.review)
+    from AutoMarkAi.backend.nodes.review import text_review_node
 
     with patch("nodes.review.interrupt",
                return_value={"copy_index": 1, "headline_index": 2,
@@ -205,9 +205,9 @@ def test_text_review_selects_copy_and_headline():
 def test_text_review_applies_manual_edits():
     """Edited copy/headline text overrides the chosen original."""
     import importlib
-    import nodes.review
-    importlib.reload(nodes.review)
-    from nodes.review import text_review_node
+    import AutoMarkAi.backend.nodes.review
+    importlib.reload(AutoMarkAi.backend.nodes.review)
+    from AutoMarkAi.backend.nodes.review import text_review_node
 
     with patch("nodes.review.interrupt",
                return_value={"copy_index": 0, "headline_index": 0,
@@ -239,9 +239,9 @@ def test_image_review_rejection_routes_to_regen_without_generating():
     so resuming never replays a (billed) generation.
     """
     import importlib
-    import nodes.review
-    importlib.reload(nodes.review)
-    from nodes.review import image_review_node
+    import AutoMarkAi.backend.nodes.review
+    importlib.reload(AutoMarkAi.backend.nodes.review)
+    from AutoMarkAi.backend.nodes.review import image_review_node
 
     with patch("nodes.review.enhance_ad_image") as mock_enh, \
          patch("nodes.review.generate_ad_images") as mock_gen, \
@@ -269,9 +269,9 @@ def test_image_review_rejection_routes_to_regen_without_generating():
 def test_image_regen_node_generates_once_and_records_history():
     """image_regen_node generates the rejected image a single time and appends it to history."""
     import importlib
-    import nodes.review
-    importlib.reload(nodes.review)
-    from nodes.review import image_regen_node
+    import AutoMarkAi.backend.nodes.review
+    importlib.reload(AutoMarkAi.backend.nodes.review)
+    from AutoMarkAi.backend.nodes.review import image_regen_node
 
     with patch("nodes.review.enhance_ad_image",
                return_value=["regenerated_b64"]) as mock_enh:
@@ -300,9 +300,9 @@ def test_image_regen_node_generates_once_and_records_history():
 def test_image_review_at_limit_routes_to_pick_without_generating():
     """Once regen_count >= max, a rejection goes to the picker and never regenerates."""
     import importlib
-    import nodes.review
-    importlib.reload(nodes.review)
-    from nodes.review import image_review_node
+    import AutoMarkAi.backend.nodes.review
+    importlib.reload(AutoMarkAi.backend.nodes.review)
+    from AutoMarkAi.backend.nodes.review import image_review_node
 
     with patch("nodes.review.enhance_ad_image") as mock_enh, \
          patch("nodes.review.generate_ad_images") as mock_gen, \
@@ -311,7 +311,7 @@ def test_image_review_at_limit_routes_to_pick_without_generating():
         result = image_review_node({
             "image_mode": "enhance_with_ai",
             "image_path": "tests/sample_input/watch.jpg",
-            "regen_count": nodes.review.MAX_REGENERATIONS_ALLOWED,
+            "regen_count": AutoMarkAi.backend.nodes.review.MAX_REGENERATIONS_ALLOWED,
             "image_history": ["b64_0", "b64_1", "b64_2"],
             "creative_output": {
                 "generated_images": ["b64_2"],

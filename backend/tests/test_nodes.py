@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_orchestrator_returns_valid_campaign_plan():
     """Orchestrator should parse LLM JSON and populate all required campaign_plan keys."""
-    from nodes.orchestrator import orchestrator_node
+    from AutoMarkAi.backend.nodes.orchestrator import orchestrator_node
 
     mock_plan = {
         "product_type": "luxury_watch",
@@ -53,7 +53,7 @@ def test_orchestrator_returns_valid_campaign_plan():
 
 def test_creative_node_returns_three_copies():
     """Creative node should produce exactly 3 ad copies and 3 headlines."""
-    from nodes.creative import creative_node
+    from AutoMarkAi.backend.nodes.creative import creative_node
 
     mock_creative = {
         "copies": [
@@ -107,7 +107,7 @@ def test_creative_node_returns_three_copies():
 
 def test_media_buying_budget_split_sums_to_one():
     """Media buying node should produce a budget_split that sums to exactly 1.0."""
-    from nodes.media_buying import media_buying_node
+    from AutoMarkAi.backend.nodes.media_buying import media_buying_node
 
     mock_media = {
         "budget_split": {"instagram": 1.0, "facebook": 0.0},
@@ -153,7 +153,7 @@ def test_merge_node_cta_coherence_fix():
     merge_node must override CTA to 'Send Message' when objective is MESSAGES
     but the creative node returned 'Shop Now', and log a warning.
     """
-    from nodes.merge import merge_node
+    from AutoMarkAi.backend.nodes.merge import merge_node
 
     state = {
         "image_path": "tests/sample_input/watch.jpg",
@@ -213,7 +213,7 @@ def test_merge_node_cta_coherence_fix():
 
 def test_call_llm_uses_groq():
     """call_llm must generate text via Groq — Gemini is image-generation only."""
-    from llm_client import call_llm
+    from AutoMarkAi.backend.llm_client import call_llm
 
     mock_groq_message = MagicMock()
     mock_groq_message.content = '{"result": "from groq"}'

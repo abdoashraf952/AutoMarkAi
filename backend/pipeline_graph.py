@@ -8,23 +8,23 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Send
 
-from nodes.creative import creative_node
-from nodes.media_buying import media_buying_node
-from nodes.merge import merge_node
-from nodes.orchestrator import orchestrator_node
-from nodes.question_generator import (
+from AutoMarkAi.backend.nodes.creative import creative_node
+from AutoMarkAi.backend.nodes.media_buying import media_buying_node
+from AutoMarkAi.backend.nodes.merge import merge_node
+from AutoMarkAi.backend.nodes.orchestrator import orchestrator_node
+from AutoMarkAi.backend.nodes.question_generator import (
     question_ask_node,
     question_gen_node,
     route_after_answer,
 )
-from nodes.review import (
+from AutoMarkAi.backend.nodes.review import (
     image_pick_node,
     image_regen_node,
     image_review_node,
     text_review_node,
 )
-from nodes.strategy import strategy_node
-from state import CampaignState
+from AutoMarkAi.backend.nodes.strategy import strategy_node
+from AutoMarkAi.backend.state import CampaignState
 
 
 def _route_after_orchestrator(state: CampaignState):

@@ -3,12 +3,12 @@
 from langgraph.types import Send
 from langgraph.graph import END, StateGraph
 
-from nodes.creative import creative_node
-from nodes.media_buying import media_buying_node
-from nodes.merge import merge_node
-from nodes.orchestrator import orchestrator_node
-from nodes.strategy import strategy_node
-from state import CampaignState
+from AutoMarkAi.backend.nodes.creative import creative_node
+from AutoMarkAi.backend.nodes.media_buying import media_buying_node
+from AutoMarkAi.backend.nodes.merge import merge_node
+from AutoMarkAi.backend.nodes.orchestrator import orchestrator_node
+from AutoMarkAi.backend.nodes.strategy import strategy_node
+from AutoMarkAi.backend.state import CampaignState
 
 
 def route_after_orchestrator(state: CampaignState):

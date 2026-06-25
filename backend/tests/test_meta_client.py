@@ -46,7 +46,7 @@ _BUNDLE = {
 
 def test_simulated_create_campaign_response_shape():
     """SimulatedMetaClient.create_campaign must return all required keys with correct types."""
-    from meta_client import SimulatedMetaClient
+    from AutoMarkAi.backend.meta_client import SimulatedMetaClient
 
     client = SimulatedMetaClient()
     result = client.create_campaign(_BUNDLE)
@@ -68,7 +68,7 @@ def test_simulated_create_campaign_response_shape():
 def test_simulated_publish_sequence_returns_all_ids():
     """Running the full create_campaign → create_ad_set → create_ad_creative → create_ad
     chain on SimulatedMetaClient should return valid IDs at every step."""
-    from meta_client import SimulatedMetaClient
+    from AutoMarkAi.backend.meta_client import SimulatedMetaClient
 
     client = SimulatedMetaClient()
 
@@ -96,7 +96,7 @@ def test_simulated_publish_sequence_returns_all_ids():
 
 def test_simulated_publish_post_and_get_status():
     """publish_post must return a post_id; get_campaign_status must return a status."""
-    from meta_client import SimulatedMetaClient
+    from AutoMarkAi.backend.meta_client import SimulatedMetaClient
 
     client = SimulatedMetaClient()
 
@@ -117,7 +117,7 @@ def test_simulated_publish_post_and_get_status():
 
 def test_factory_returns_simulated_client_by_default():
     """get_meta_client() with no META_SIMULATION_MODE set must return SimulatedMetaClient."""
-    from meta_client import SimulatedMetaClient, get_meta_client
+    from AutoMarkAi.backend.meta_client import SimulatedMetaClient, get_meta_client
 
     # Ensure env variable is unset or set to true
     with patch.dict(os.environ, {"META_SIMULATION_MODE": "true"}):
@@ -132,7 +132,7 @@ def test_factory_returns_simulated_client_by_default():
 
 def test_factory_returns_real_client_when_flag_false():
     """get_meta_client() with META_SIMULATION_MODE=false must return RealMetaClient."""
-    from meta_client import RealMetaClient
+    from AutoMarkAi.backend.meta_client import RealMetaClient
 
     mock_api = MagicMock()
     mock_api.init = MagicMock()
@@ -148,7 +148,7 @@ def test_factory_returns_real_client_when_flag_false():
 
     with patch.dict(os.environ, env_overrides):
         with patch("meta_client.RealMetaClient.__init__", return_value=None):
-            from meta_client import get_meta_client
+            from AutoMarkAi.backend.meta_client import get_meta_client
             client = get_meta_client()
 
     assert isinstance(client, RealMetaClient)
@@ -160,7 +160,7 @@ def test_factory_returns_real_client_when_flag_false():
 
 def test_cta_type_mapping_all_objectives():
     """create_ad_creative must map every campaign objective to the correct Meta CTA type."""
-    from meta_client import SimulatedMetaClient, _CTA_TYPE
+    from AutoMarkAi.backend.meta_client import SimulatedMetaClient, _CTA_TYPE
 
     client = SimulatedMetaClient()
 

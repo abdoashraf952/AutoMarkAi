@@ -5,7 +5,7 @@ rationale) should be in Egyptian colloquial Arabic. Structural values (archetype
 days, ISO codes) and `interests` stay in English so they map to Meta targeting.
 """
 
-from templates.locales.en.strategy import USER_TEMPLATE  # noqa: F401 — identical template
+from AutoMarkAi.backend.templates.locales.en.strategy import USER_TEMPLATE  # noqa: F401 — identical template
 
 SYSTEM = (
     "إنت استراتيجي تسويق محترف بتبني خطط تسويق مخصّصة لحملات ميتا (إنستجرام/فيسبوك) "

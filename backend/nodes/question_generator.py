@@ -18,8 +18,8 @@ import os
 
 from langgraph.types import interrupt
 
-from llm_client import _parse_json_with_retry, _strip_markdown_fences, call_llm_vision
-from i18n import get_question_prompts
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, _strip_markdown_fences, call_llm_vision
+from AutoMarkAi.backend.i18n import get_question_prompts
 
 logger = logging.getLogger(__name__)
 

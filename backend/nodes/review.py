@@ -28,7 +28,7 @@ import os
 
 from langgraph.types import interrupt
 
-from llm_client import enhance_ad_image, generate_ad_images
+from AutoMarkAi.backend.llm_client import enhance_ad_image, generate_ad_images
 
 logger = logging.getLogger(__name__)
 
