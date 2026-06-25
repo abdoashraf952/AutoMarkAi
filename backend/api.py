@@ -15,6 +15,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+# Make the backend importable regardless of how uvicorn is launched: both
+# `uvicorn AutoMarkAi.backend.api:app` (from the project root) and
+# `uvicorn api:app` (from this backend/ folder) work. The deferred
+# `from AutoMarkAi.backend...` imports below resolve only when the project root
+# (the parent of the AutoMarkAi/ repo) is on sys.path, so ensure it is.
+import sys
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)

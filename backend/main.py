@@ -9,6 +9,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Make the backend importable whether this is run as
+# `python -m AutoMarkAi.backend.main` (from the project root) or
+# `python main.py` (from this backend/ folder): ensure the project root
+# (the parent of the AutoMarkAi/ repo) is on sys.path so the deferred
+# `from AutoMarkAi.backend...` import works either way.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
