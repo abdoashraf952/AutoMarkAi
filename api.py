@@ -165,8 +165,8 @@ async def _advance(session: dict, input_) -> None:
 # Request / response schemas                                           #
 # ------------------------------------------------------------------ #
 
-class AnswersBody(BaseModel):
-    answers: dict[str, str]  # {"0": "...", "1": "...", "2": "...", "3": "..."}
+class AnswerBody(BaseModel):
+    answer: str  # the answer to the single question currently being asked
 
 
 class ImageDecisionBody(BaseModel):
@@ -180,8 +180,10 @@ class PickImageBody(BaseModel):
 
 
 class TextDecisionBody(BaseModel):
-    action: str               # "approve" | "edit"
-    feedback: str = ""        # required when action == "edit"
+    copy_index: int = 0       # which of the generated copies the user chose
+    headline_index: int = 0   # which of the generated headlines the user chose
+    copy_text: str = ""        # final copy text (manually edited or same as chosen)
+    headline_text: str = ""    # final headline text (manually edited or same as chosen)
 
 
 class PublishBody(BaseModel):
@@ -277,19 +279,22 @@ async def get_state(session_id: str):
     }
 
 
-@app.post("/session/{session_id}/answers", summary="Submit answers to product questions", tags=["Human-in-the-loop"])
-async def submit_answers(session_id: str, body: AnswersBody):
+@app.post("/session/{session_id}/answer", summary="Answer the current product question", tags=["Human-in-the-loop"])
+async def submit_answer(session_id: str, body: AnswerBody):
     """
-    Resume the graph after the 'questions' interrupt.
-    Triggers orchestrator → creative + media buying fan-out → image generation → image review interrupt.
+    Resume the graph after a 'questions' interrupt with the answer to the CURRENT
+    question. The interview is adaptive: each answer is used to generate the next
+    question. After the last question, the pipeline continues
+    (orchestrator → strategy → creative + media → image review).
 
-    Body: {"answers": {"0": "...", "1": "...", "2": "...", "3": "..."}}
-    Returns: stage ('image_review') + image data reference.
+    Body: {"answer": "..."}
+    Returns: stage ('questions' with the next question, or 'image_review' when done)
+             + the interrupt data (which includes the next `question`, `index`, `total`).
     """
     from langgraph.types import Command
     session = _get_session(session_id)
     _assert_stage(session, "questions")
-    await _advance(session, Command(resume={"answers": body.answers}))
+    await _advance(session, Command(resume={"answer": body.answer}))
     return {"stage": session["ui_stage"], "data": _safe_data(session["interrupt_data"])}
 
 
@@ -345,22 +350,27 @@ async def pick_image(session_id: str, body: PickImageBody):
     return {"stage": session["ui_stage"], "data": _safe_data(session["interrupt_data"])}
 
 
-@app.post("/session/{session_id}/text-decision", summary="Approve or request changes to ad copy", tags=["Human-in-the-loop"])
+@app.post("/session/{session_id}/text-decision", summary="Choose & edit the ad copy + headline", tags=["Human-in-the-loop"])
 async def text_decision(session_id: str, body: TextDecisionBody):
     """
     Resume the graph after the 'text_review' interrupt.
 
-    To approve:       {"action": "approve"}
-    To request edit:  {"action": "edit", "feedback": "Make tone more urgent"}
+    The user picks ONE of the generated copies and ONE of the headlines, and may
+    edit either text manually. The chosen (possibly edited) copy/headline become
+    the primary creative used in the campaign.
 
-    Returns: stage ('done' on approve, 'image_review' on edit — copy is regenerated).
+    Body: {"copy_index": 0, "headline_index": 1,
+           "copy_text": "final copy…", "headline_text": "final headline…"}
+    Returns: stage ('done').
     """
     from langgraph.types import Command
     session = _get_session(session_id)
     _assert_stage(session, "text_review")
     await _advance(session, Command(resume={
-        "approved": body.action == "approve",
-        "feedback": body.feedback,
+        "copy_index": body.copy_index,
+        "headline_index": body.headline_index,
+        "copy_text": body.copy_text,
+        "headline_text": body.headline_text,
     }))
     return {"stage": session["ui_stage"], "data": _safe_data(session["interrupt_data"])}
 

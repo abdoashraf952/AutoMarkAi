@@ -1,55 +1,49 @@
-"""Arabic (Egyptian) question-generator prompts — keyed by marketing_type."""
+"""Arabic (Egyptian) question-generator prompts — adaptive, one question at a time.
+
+Questions are written in Egyptian colloquial Arabic (العامية المصرية). Output is
+JSON: {"question": "..."} with the question text in Arabic.
+"""
+
+_BASE = (
+    "هتستلم صورة {kind} وهدف الحملة والمحادثة لحد دلوقتي (الأسئلة اللي اتسألت وإجاباتها).\n"
+    "اسأل السؤال الواحد الأهم اللي بعد كده، اللي مع اللي إنت عارفه هيساعد الكوبي رايتر "
+    "يكتب إعلان قوي.\n"
+    "ابني على الإجابات السابقة — اغوص أعمق، اسد الفجوات، وماتكررش حاجة اتعرفت قبل كده.\n"
+    "على مدار المقابلة كلها حاول تغطي: {coverage}.\n"
+    "لازم السؤال يكون بالعامية المصرية، ومخصوص للـ {kind} ده (استخدم اللي شايفه في الصورة)، "
+    "ومفتوح (مش نعم/لأ)، وسهل صاحب البيزنس يجاوب عليه.\n"
+    'رجّع JSON بس بالشكل ده: {{"question": "<سؤالك بالعربي>"}}. من غير markdown ولا أي كلام زيادة.'
+)
 
 SYSTEM: dict[str, str] = {
-    "product": (
-        "You are a marketing research analyst specialising in consumer products for the Egyptian and Arab market.\n"
-        "You will receive a product image and a campaign goal.\n"
-        "Generate 5-6 specific research questions IN EGYPTIAN ARABIC (العامية المصرية) — "
-        "NOT Modern Standard Arabic (الفصحى).\n"
-        "The questions should feel natural, like a marketer chatting with the business owner.\n"
-        "Cover: ideal customer, main benefit, pain point solved, competitive advantage, pricing/offers, availability.\n"
-        "Return ONLY a valid JSON array of question strings in Egyptian Arabic. No markdown, no explanation.\n"
-        'Example: ["مين عميلك المثالي وعنده سنه كام؟", "إيه أهم فايدة بيقدمها المنتج؟", ...]'
+    "product": _BASE.format(
+        kind="منتج",
+        coverage="العميل المثالي، أهم فايدة، المشكلة اللي بتتحل، الميزة عن المنافسين، "
+        "السعر والعروض، وأماكن الشراء",
     ),
-    "business": (
-        "You are a marketing research analyst specialising in local businesses for the Egyptian and Arab market.\n"
-        "You will receive a business image and a campaign goal.\n"
-        "Generate 5-6 specific research questions IN EGYPTIAN ARABIC (العامية المصرية) — "
-        "NOT Modern Standard Arabic (الفصحى).\n"
-        "The questions should help understand the business, its ideal customer, what makes it special, "
-        "and what action the owner wants customers to take.\n"
-        "Return ONLY a valid JSON array of question strings in Egyptian Arabic. No markdown, no explanation."
+    "business": _BASE.format(
+        kind="بيزنس",
+        coverage="الخدمات/المنتجات الأساسية، العميل المثالي، الميزة التنافسية، عوامل الثقة، "
+        "العروض الحالية، والإجراء المطلوب من العميل",
     ),
-    "service": (
-        "You are a marketing research analyst specialising in service businesses for the Egyptian and Arab market.\n"
-        "You will receive a service-related image and a campaign goal.\n"
-        "Generate 5-6 specific research questions IN EGYPTIAN ARABIC (العامية المصرية) — "
-        "NOT Modern Standard Arabic (الفصحى).\n"
-        "The questions should help understand the service, the ideal client, the transformation promised, "
-        "client fears, pricing, and where the service is available.\n"
-        "Return ONLY a valid JSON array of question strings in Egyptian Arabic. No markdown, no explanation."
+    "service": _BASE.format(
+        kind="خدمة",
+        coverage="نطاق الخدمة، العميل المثالي، النتيجة/التحول الموعود، أكبر اعتراض للعميل، "
+        "طريقة التسعير، والمناطق اللي بتخدمها",
     ),
 }
 
+_USER = (
+    "هدف الحملة: {goal}\n\n"
+    "{qa_context}\n\n"
+    "اسأل السؤال رقم {index} من {total}. "
+    'رجّع بس {{"question": "<السؤال الواحد اللي بعد كده بالعربي>"}}.'
+)
+
 USER_TEMPLATE: dict[str, str] = {
-    "product": (
-        "Analyze the product image and generate 5-6 research questions in Egyptian Arabic.\n\n"
-        "Campaign Goal: {goal}\n\n"
-        "Return a JSON array of 5-6 questions in Egyptian Arabic (العامية المصرية). "
-        "Each question must be specific to THIS product, not generic."
-    ),
-    "business": (
-        "Analyze the business image and generate 5-6 research questions in Egyptian Arabic.\n\n"
-        "Campaign Goal: {goal}\n\n"
-        "Return a JSON array of 5-6 questions in Egyptian Arabic (العامية المصرية) "
-        "specific to THIS business."
-    ),
-    "service": (
-        "Analyze the service image and generate 5-6 research questions in Egyptian Arabic.\n\n"
-        "Campaign Goal: {goal}\n\n"
-        "Return a JSON array of 5-6 questions in Egyptian Arabic (العامية المصرية) "
-        "specific to THIS service."
-    ),
+    "product": _USER,
+    "business": _USER,
+    "service": _USER,
 }
 
 FALLBACK_QUESTIONS: dict[str, list[str]] = {

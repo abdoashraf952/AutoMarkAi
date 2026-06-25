@@ -1,4 +1,4 @@
-"""Orchestrator node — vision analysis via Groq, produces campaign_plan."""
+"""Orchestrator node — vision analysis via Gemini, produces campaign_plan."""
 
 import logging
 
@@ -12,7 +12,7 @@ def orchestrator_node(state: dict) -> dict:
     """
     Analyze the product/business/service image and user inputs to produce campaign_plan.
 
-    Uses Groq's multimodal (vision) model. On failure, writes to errors and
+    Uses Gemini's multimodal (vision) model. On failure, writes to errors and
     returns an empty campaign_plan.
 
     State reads:  image_path, budget, goal, marketing_type, language, questions, user_answers
@@ -53,7 +53,7 @@ def orchestrator_node(state: dict) -> dict:
         logger.info("orchestrator_node produced campaign_plan (lang=%s type=%s)", language, marketing_type)
         return {
             "campaign_plan": campaign_plan,
-            "llm_used": {"orchestrator": "groq"},
+            "llm_used": {"orchestrator": "gemini"},
             "errors": [],
         }
     except Exception as e:

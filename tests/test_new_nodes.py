@@ -11,44 +11,74 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ---------------------------------------------------------------------------
-# Test 6: question_generator_node returns 4 questions and collects answers
+# Test 6: adaptive question flow — gen produces one question, ask collects answer
 # ---------------------------------------------------------------------------
 
-def test_question_generator_returns_four_questions():
-    """question_generator_node should produce exactly 4 questions and interrupt for answers."""
-    mock_questions = ["Q1?", "Q2?", "Q3?", "Q4?"]
-    mock_answers = {"0": "A1", "1": "A2", "2": "A3", "3": "A4"}
-
+def test_question_gen_node_generates_single_question():
+    """question_gen_node returns exactly one new question, parsed from JSON."""
     with patch("nodes.question_generator.call_llm_vision",
-               return_value=json.dumps(mock_questions)):
-        with patch("nodes.question_generator.interrupt",
-                   return_value={"answers": mock_answers}):
-            from nodes.question_generator import question_generator_node
-            result = question_generator_node({
-                "image_path": "tests/sample_input/watch.jpg",
-                "goal": "get WhatsApp leads",
-            })
+               return_value=json.dumps({"question": "Who is your ideal buyer?"})):
+        from nodes.question_generator import question_gen_node
+        result = question_gen_node({
+            "image_path": "tests/sample_input/watch.jpg",
+            "goal": "get WhatsApp leads",
+            "questions": [],
+            "user_answers": {},
+        })
 
-    assert result["questions"] == mock_questions
-    assert result["user_answers"] == mock_answers
-    assert result["errors"] == []
+    assert result["questions"] == ["Who is your ideal buyer?"]
 
 
-def test_question_generator_falls_back_on_bad_response():
-    """question_generator_node must use 4 generic fallback questions if LLM returns garbage."""
+def test_question_gen_node_uses_prior_qa_context():
+    """The next question's prompt must include the previous question and answer."""
+    captured = {}
+
+    def capture(image_path, prompt, system):
+        captured["prompt"] = prompt
+        return json.dumps({"question": "What's your busiest season?"})
+
+    with patch("nodes.question_generator.call_llm_vision", side_effect=capture):
+        from nodes.question_generator import question_gen_node
+        result = question_gen_node({
+            "image_path": "tests/sample_input/watch.jpg",
+            "goal": "drive sales",
+            "questions": ["Who is your ideal buyer?"],
+            "user_answers": {"0": "Young women who love fragrances"},
+        })
+
+    assert "Young women who love fragrances" in captured["prompt"]
+    assert len(result["questions"]) == 2  # appended the second question
+
+
+def test_question_gen_node_falls_back_on_failure():
+    """If the vision call fails, gen_node uses the index-aligned fallback question."""
     with patch("nodes.question_generator.call_llm_vision",
-               return_value="not valid json"):
-        with patch("nodes.question_generator.interrupt",
-                   return_value={"answers": {}}):
-            from nodes.question_generator import question_generator_node
-            result = question_generator_node({
-                "image_path": "tests/sample_input/watch.jpg",
-                "goal": "drive traffic",
-            })
+               side_effect=RuntimeError("vision down")):
+        from nodes.question_generator import question_gen_node
+        result = question_gen_node({
+            "image_path": "tests/sample_input/watch.jpg",
+            "goal": "drive traffic",
+            "questions": [],
+            "user_answers": {},
+        })
 
-    # Fallback set size depends on marketing_type (4–8 questions are valid).
-    assert 4 <= len(result["questions"]) <= 8
-    assert all(isinstance(q, str) for q in result["questions"])
+    assert len(result["questions"]) == 1
+    assert isinstance(result["questions"][0], str) and result["questions"][0]
+
+
+def test_question_ask_node_stores_answer_and_routes():
+    """question_ask_node stores the answer; route_after_answer loops until NUM_QUESTIONS."""
+    import nodes.question_generator as qg
+
+    with patch("nodes.question_generator.interrupt", return_value={"answer": "A1"}):
+        result = qg.question_ask_node({"questions": ["Q1?"], "user_answers": {}})
+
+    assert result["user_answers"] == {"0": "A1"}
+    # one answer < NUM_QUESTIONS → loop back to generate the next question
+    assert qg.route_after_answer({"user_answers": {"0": "A1"}}) == "question_gen_node"
+    # enough answers → move on to the orchestrator
+    full = {str(i): "x" for i in range(qg.NUM_QUESTIONS)}
+    assert qg.route_after_answer({"user_answers": full}) == "orchestrator_node"
 
 
 # ---------------------------------------------------------------------------
@@ -138,43 +168,19 @@ def test_creative_node_uses_feedback_in_prompt():
 
 
 # ---------------------------------------------------------------------------
-# Test 9: text_review_node returns done when copy is approved
+# Test 9: text_review_node moves the chosen copy + headline to the front
 # ---------------------------------------------------------------------------
 
-def test_text_review_approved_returns_done():
-    """text_review_node should return review_stage='done' when copy is approved."""
-    import importlib
-    import nodes.review
-    importlib.reload(nodes.review)
-    from nodes.review import text_review_node
-
-    with patch("nodes.review.interrupt", return_value={"approved": True, "feedback": ""}):
-        result = text_review_node({
-            "creative_output": {
-                "generated_images": ["b64_1"],
-                "copies": ["C1", "C2", "C3"],
-                "headlines": ["H1", "H2", "H3"],
-                "cta": "Shop Now",
-            }
-        })
-
-    assert result["review_stage"] == "done"
-    assert result["feedback"] == {}
-
-
-# ---------------------------------------------------------------------------
-# Test 10: text_review_node routes back to creative on copy rejection
-# ---------------------------------------------------------------------------
-
-def test_text_review_rejected_routes_to_creative():
-    """text_review_node should return review_stage='redo_creative' when copy is rejected."""
+def test_text_review_selects_copy_and_headline():
+    """Choosing copy #1 and headline #2 makes them the primary creative; always done."""
     import importlib
     import nodes.review
     importlib.reload(nodes.review)
     from nodes.review import text_review_node
 
     with patch("nodes.review.interrupt",
-               return_value={"approved": False, "feedback": "Make it more urgent"}):
+               return_value={"copy_index": 1, "headline_index": 2,
+                             "copy_text": "", "headline_text": ""}):
         result = text_review_node({
             "creative_output": {
                 "generated_images": ["b64_1"],
@@ -184,8 +190,42 @@ def test_text_review_rejected_routes_to_creative():
             }
         })
 
-    assert result["review_stage"] == "redo_creative"
-    assert result["feedback"]["creative"] == "Make it more urgent"
+    creative = result["creative_output"]
+    assert result["review_stage"] == "done"
+    assert creative["copies"][0] == "C2"          # chosen copy moved to front
+    assert creative["headlines"][0] == "H3"       # chosen headline moved to front
+    assert creative["selected_copy"] == "C2"
+    assert creative["selected_headline"] == "H3"
+
+
+# ---------------------------------------------------------------------------
+# Test 10: text_review_node honours manual edits to the chosen text
+# ---------------------------------------------------------------------------
+
+def test_text_review_applies_manual_edits():
+    """Edited copy/headline text overrides the chosen original."""
+    import importlib
+    import nodes.review
+    importlib.reload(nodes.review)
+    from nodes.review import text_review_node
+
+    with patch("nodes.review.interrupt",
+               return_value={"copy_index": 0, "headline_index": 0,
+                             "copy_text": "Edited copy!", "headline_text": "Edited headline!"}):
+        result = text_review_node({
+            "creative_output": {
+                "generated_images": ["b64_1"],
+                "copies": ["C1", "C2", "C3"],
+                "headlines": ["H1", "H2", "H3"],
+                "cta": "Shop Now",
+            }
+        })
+
+    creative = result["creative_output"]
+    assert creative["copies"][0] == "Edited copy!"
+    assert creative["selected_copy"] == "Edited copy!"
+    assert creative["headlines"][0] == "Edited headline!"
+    assert result["review_stage"] == "done"
 
 
 # ---------------------------------------------------------------------------

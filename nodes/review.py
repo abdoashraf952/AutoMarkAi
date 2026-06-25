@@ -234,35 +234,48 @@ def image_pick_node(state: dict) -> dict:
 # Phase 2: Text review — single interrupt                             #
 # ------------------------------------------------------------------ #
 def text_review_node(state: dict) -> dict:
-    """Approve or request changes to the ad copy.
+    """Let the user pick ONE copy + ONE headline (and optionally edit them).
 
     Interrupt payload: {"stage": "text_review", "copies": [...],
                         "headlines": [...], "cta": str}
-    Resume payload:    {"approved": bool, "feedback": str}
+    Resume payload:    {"copy_index": int, "headline_index": int,
+                        "copy_text": str, "headline_text": str}
 
-    If approved  → review_stage="done"          (graph → merge_node)
-    If rejected  → review_stage="redo_creative" (graph → creative_node, copy only)
+    The chosen (possibly edited) copy/headline are moved to the front of the
+    creative so they're the primary text used everywhere downstream (ad preview,
+    Meta creative). Always proceeds to merge_node.
     """
     creative = dict(state.get("creative_output") or {})
+    copies = list(creative.get("copies") or [])
+    headlines = list(creative.get("headlines") or [])
 
-    text_result = interrupt({
+    result = interrupt({
         "stage": "text_review",
-        "copies": creative.get("copies", []),
-        "headlines": creative.get("headlines", []),
+        "copies": copies,
+        "headlines": headlines,
         "cta": creative.get("cta", ""),
     })
 
-    text_approved: bool = text_result.get("approved", False)
-    text_feedback: str = text_result.get("feedback", "")
+    ci = result.get("copy_index", 0)
+    hi = result.get("headline_index", 0)
 
-    if text_approved:
-        return {
-            "creative_output": creative,
-            "review_stage": "done",
-            "feedback": {},
-        }
+    def _pick(items: list[str], idx: int, override: str) -> tuple[str, list[str]]:
+        chosen = override.strip() if (override or "").strip() else (
+            items[idx] if 0 <= idx < len(items) else (items[0] if items else "")
+        )
+        rest = [it for i, it in enumerate(items) if i != idx]
+        return chosen, [chosen] + rest
+
+    chosen_copy, new_copies = _pick(copies, ci, result.get("copy_text", ""))
+    chosen_headline, new_headlines = _pick(headlines, hi, result.get("headline_text", ""))
+
+    creative["copies"] = new_copies
+    creative["headlines"] = new_headlines
+    creative["selected_copy"] = chosen_copy
+    creative["selected_headline"] = chosen_headline
+
     return {
         "creative_output": creative,
-        "review_stage": "redo_creative",
-        "feedback": {"creative": text_feedback},
+        "review_stage": "done",
+        "feedback": {},
     }

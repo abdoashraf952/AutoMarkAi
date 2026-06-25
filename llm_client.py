@@ -1,16 +1,17 @@
-"""LLM client — Groq for ALL text (including vision→text), Gemini ONLY for image generation.
+"""LLM client — provider split:
 
-Text generation (`call_llm`) and image-understanding (`call_llm_vision`) both run
-on Groq. Gemini is used exclusively for `generate_ad_images` / `enhance_ad_image`.
+- Text generation (`call_llm`)           → Groq (llama-3.3-70b-versatile)
+- Image understanding (`call_llm_vision`) → Gemini (gemini-2.5-flash, multimodal)
+- Image generation (`generate_ad_images`/`enhance_ad_image`) → Gemini image model
 """
 
 import base64
-import io
 import json
 import logging
 import os
 import re
 
+import google.generativeai as genai
 from dotenv import load_dotenv
 from groq import Groq
 from PIL import Image
@@ -29,11 +30,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Text + vision run on Groq; only image generation uses Gemini.
+# Text runs on Groq; image understanding + image generation run on Gemini.
+GEMINI_MODEL = "gemini-2.5-flash"
 GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 GEMINI_IMAGE_MODEL = "gemini-3.1-flash-image"
 
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
@@ -88,44 +90,20 @@ def call_llm(
         raise RuntimeError(f"Groq text generation failed for node {node_name}: {e}") from e
 
 
-def _image_to_data_url(image_path: str, max_dim: int = 1024) -> str:
-    """Load an image, downscale it to keep the request small, and return a
-    base64 `data:` URL suitable for Groq's vision API (which caps base64
-    payloads at ~4 MB)."""
-    img = Image.open(image_path)
-    if img.mode not in ("RGB", "L"):
-        img = img.convert("RGB")
-    img.thumbnail((max_dim, max_dim))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)
-    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-    return f"data:image/jpeg;base64,{b64}"
-
-
 def call_llm_vision(image_path: str, prompt: str, system_prompt: str) -> str:
     """
-    Multimodal (image + text) call via Groq's vision model. Used to analyze the
-    product photo and produce text (questions / campaign plan).
+    Multimodal (image + text) call via Gemini. Used to analyze the product photo
+    and produce text (questions / campaign plan). Image understanding is Gemini's
+    job; the PIL Image is passed directly to the SDK.
 
     Returns:
         Raw response text.
     """
-    data_url = _image_to_data_url(image_path)
-    resp = _groq_client.chat.completions.create(
-        model=GROQ_VISION_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-    )
-    logger.info("vision call complete for %s provider=groq", image_path)
-    return resp.choices[0].message.content
+    img = Image.open(image_path)
+    model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=system_prompt)
+    response = model.generate_content([img, prompt])
+    logger.info("vision call complete for %s provider=gemini", image_path)
+    return response.text
 
 
 def _gemini_image_call(contents, n: int) -> list[str]:

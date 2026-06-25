@@ -42,98 +42,73 @@ The system has **two graph variants** built on LangGraph:
 
 ### Pipeline Graph (full pipeline, `pipeline_graph.py`)
 
+> A standalone, renderable copy of this diagram lives in
+> [`architecture.mmd`](architecture.mmd) (paste into <https://mermaid.live> or run
+> `mmdc -i architecture.mmd -o architecture.png`). GitHub renders the block below directly.
+
+```mermaid
+flowchart TD
+    U([User input<br/>image · budget · goal · language])
+
+    subgraph Interview["Adaptive interview — loops until NUM_QUESTIONS"]
+        QG["question_gen_node<br/>Gemini Vision · next question"]
+        QA["question_ask_node<br/>interrupt · collect answer"]
+        QG --> QA
+        QA -- next question --> QG
+    end
+
+    ORC["orchestrator_node<br/>Gemini Vision → campaign_plan"]
+    STR["strategy_node — Strategist<br/>Groq + tools → persona · channels · dayparting"]
+
+    subgraph Fanout["Sub-agents (parallel)"]
+        CRE["creative_node<br/>copies · headlines · CTA · image"]
+        MB["media_buying_node<br/>budget · bid · placements"]
+    end
+
+    subgraph ReviewG["Human-in-the-loop review"]
+        IR["image_review_node<br/>interrupt"]
+        RG["image_regen_node<br/>Gemini image"]
+        PK["image_pick_node<br/>interrupt · pick"]
+        TR["text_review_node<br/>interrupt · choose 1 copy + 1 headline, edit"]
+    end
+
+    MRG["merge_node<br/>validate · assemble bundle"]
+    PUB([Publish to Meta<br/>user-triggered])
+
+    U --> QG
+    QA -- all answered --> ORC --> STR
+    STR --> CRE
+    STR --> MB
+    CRE --> IR
+    IR -- regenerate --> RG --> IR
+    IR -- limit / see all --> PK --> TR
+    IR -- approve --> TR
+    TR --> MRG
+    MB --> MRG
+    MRG --> PUB
 ```
-User Input (image + budget + goal + image_mode)
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────┐
-│               question_generator_node                         │
-│  • Analyzes product image + goal with Groq Vision             │
-│  • Generates product-specific questions                       │
-│  • INTERRUPT → waits for user answers                         │
-└──────────────────────┬───────────────────────────────────────┘
-                       │  (answers appended to orchestrator prompt)
-                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│                   orchestrator_node                           │
-│  • Analyzes image with Groq Vision + Q&A context             │
-│  • Decides platform, objective, tone, target audience         │
-│  • Produces: campaign_plan                                    │
-└──────────────────────┬───────────────────────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    strategy_node  (Strategist)               │
-│  • Builds target persona + channel selection                  │
-│  • Computes dayparting peak windows (audience timezone)       │
-│  • Produces messaging angles → feeds creative & media         │
-│  • Tools: dayparting KB, timezone resolver, Meta formatter,   │
-│    optional web search (ENABLE_WEB_SEARCH)                     │
-└──────────────────────┬───────────────────────────────────────┘
-                       │
-          ┌────────────┴────────────┐
-          │  Fan-out (parallel)     │
-          ▼                         ▼
-┌──────────────────┐     ┌──────────────────────┐
-│  creative_node   │     │  media_buying_node    │
-│ • Writes ad      │     │ • Allocates budget    │
-│   copies         │     │   per platform        │
-│ • Writes         │     │ • Defines audience    │
-│   headlines      │     │   targeting           │
-│ • Sets CTA       │     │ • Picks bid strategy  │
-│ • Sources image: │     │ • Estimates reach     │
-│   use_original → │     │                       │
-│   encodes photo  │     │                       │
-│   enhance_with_  │     │                       │
-│   ai → Gemini    │     │                       │
-│   image model    │     │                       │
-└────────┬─────────┘     └──────────┬────────────┘
-         │                          │
-         ▼                          │
-┌──────────────────────────────┐    │
-│         review_node          │    │
-│ • INTERRUPT → image review   │    │
-│   use_original: confirm only │    │
-│   enhance_with_ai: approve / │    │
-│   re-enhance with feedback   │    │
-│ • INTERRUPT → text review    │    │
-│   (copies, headlines, CTA)   │    │
-│                              │    │
-│  If text rejected → loops    │    │
-│  back to creative_node       │    │
-└──────────┬───────────────────┘    │
-           │  (when all approved)   │
-           └─────────┬──────────────┘
-                     │  Fan-in
-                     ▼
-          ┌─────────────────────────┐
-          │       merge_node        │
-          │ • Validates all outputs │
-          │ • Fixes CTA mismatches  │
-          │ • Normalizes budget     │
-          │ • Assembles final JSON  │
-          └────────────┬────────────┘
-                       │
-                       ▼
-          ┌─────────────────────────┐
-          │     Publish to Meta     │
-          │ (user-triggered button) │
-          │ • create_campaign       │
-          │ • create_ad_set         │
-          │ • create_ad_creative    │
-          │ • create_ad (PAUSED)    │
-          │ • publish_post          │
-          └─────────────────────────┘
-```
+
+- **Sequential then parallel:** the interview and orchestrator run first; the
+  **Strategist** runs next and feeds the persona/angles into the parallel
+  `creative_node` + `media_buying_node` fan-out.
+- **Interrupts** (human-in-the-loop) are the `*_ask` / `*_review` / `*_pick`
+  nodes. Image generation only happens inside `image_regen_node`, so resuming an
+  interrupt never replays (or re-bills) a generation.
 
 ### CLI Graph (simplified, no interrupts)
 
-```
-START → orchestrator_node → [fan-out] → creative_node ─┐
-                                      → media_buying_node ─┴→ merge_node → END
+```mermaid
+flowchart LR
+    S([START]) --> ORC[orchestrator_node] --> STR[strategy_node]
+    STR --> CRE[creative_node]
+    STR --> MB[media_buying_node]
+    CRE --> MRG[merge_node]
+    MB --> MRG
+    MRG --> E([END])
 ```
 
-The CLI graph skips `question_generator_node`, `review_node`, and the Meta publish step.
+The CLI graph keeps the orchestrator → Strategist → fan-out core but skips the
+adaptive interview, the human review nodes, and the Meta publish step.
 
 ---
 
@@ -147,18 +122,18 @@ AutoMarkAi/
 ├── graph.py                  ← CLI graph — no interrupts, no checkpointer
 ├── pipeline_graph.py         ← Full graph — MemorySaver, all nodes (used by api.py)
 ├── state.py                  ← Shared state schema (TypedDict)
-├── llm_client.py             ← LLM abstraction — Groq for all text/vision, Gemini for image gen
+├── llm_client.py             ← LLM abstraction — Groq for text, Gemini for vision + image gen
 ├── strategy_tools.py         ← Deterministic Strategist tools (dayparting KB, timezone, Meta schedule, web search)
 ├── meta_client.py            ← Meta Marketing API client (simulated + real)
 │
 ├── nodes/
-│   ├── question_generator.py ← Node 0: vision → questions + interrupt for answers
-│   ├── orchestrator.py       ← Node 1: vision + Q&A context → campaign_plan
+│   ├── question_generator.py ← Node 0: adaptive interview (gen + ask, one question at a time)
+│   ├── orchestrator.py       ← Node 1: Gemini vision + Q&A context → campaign_plan
 │   ├── strategy.py           ← Node 1.5: persona + channels + dayparting (Strategist)
 │   ├── creative.py           ← Node 2: text + image sourcing (original or Gemini image edit)
 │   ├── media_buying.py       ← Node 3: text → budget, audience, placements
 │   ├── review.py             ← Node 4: split interrupt nodes — image review, regen, pick, text review
-│   └── merge.py              ← Node 5: pure Python validation + JSON assembly
+│   └── merge.py              ← Node 5: validation + JSON assembly (+ Strategist audience override)
 │
 ├── prompts/
 │   ├── question_generator.py ← Prompts for question_generator_node
@@ -168,7 +143,8 @@ AutoMarkAi/
 │
 ├── tests/
 │   ├── test_nodes.py         ← Unit tests for core pipeline nodes
-│   ├── test_new_nodes.py     ← Unit tests for question generator, review, creative
+│   ├── test_new_nodes.py     ← Unit tests for adaptive interview, review nodes, creative
+│   ├── test_strategy.py      ← Unit tests for the Strategist + its deterministic tools
 │   ├── test_meta_client.py   ← Unit tests for Meta client (simulated + real)
 │   └── sample_input/
 │       ├── watch.jpg         ← Sample luxury watch image
@@ -187,19 +163,28 @@ test_api.py                   ← End-to-end API test script (project root)
 
 ## Node-by-Node Breakdown
 
-### Node 0 — `question_generator_node` (`nodes/question_generator.py`)
+### Node 0 — adaptive interview (`nodes/question_generator.py`)
 
-**Role:** Warms up the pipeline by generating product-specific research questions before the orchestrator runs.
+**Role:** An adaptive interview that generates questions **one at a time**, each
+one informed by the image + everything asked and answered so far. Split into two
+nodes so the (Gemini vision) generation never replays on resume:
+
+- `question_gen_node` — generates the next question (no interrupt, side-effecting)
+- `question_ask_node` — `interrupt()` to collect that answer (no side effect)
+- `route_after_answer` — loops back to `question_gen_node` until `NUM_QUESTIONS`
+  answers are collected, then proceeds to the orchestrator
 
 **How it works:**
 
-1. Receives `image_path` and `goal` from the initial state
-2. Calls **Gemini Vision** with the product image and a marketing analyst prompt
-3. Parses the response into exactly 4 question strings (falls back to 4 generic questions if the LLM response is invalid)
-4. Calls `interrupt()` — pauses the graph and sends the questions to the UI
-5. Resumes when the user submits their answers
+1. `question_gen_node` builds a prompt from `goal` + the prior Q&A and calls
+   **Gemini Vision** with the product image; expects `{"question": "..."}`
+2. `question_ask_node` interrupts with `{"stage": "questions", "question", "index", "total"}`
+3. The UI shows that one question; the answer comes back via `POST /answer`
+4. If fewer than `NUM_QUESTIONS` (default 4) answered → generate the next, adapted
+   question; otherwise continue the pipeline
+5. If a generation fails, an index-aligned fallback question is used
 
-**LLM used:** Groq vision (`meta-llama/llama-4-scout-17b-16e-instruct`).
+**LLM used:** Gemini Vision (`gemini-2.5-flash`).
 
 **Only in:** full pipeline graph. Skipped in CLI.
 
@@ -228,9 +213,9 @@ test_api.py                   ← End-to-end API test script (project root)
 
 1. Receives image path, budget, goal, and (in the full pipeline) the user Q&A from state
 2. Formats the Q&A answers as a structured block and appends them to the prompt
-3. Calls **Groq's vision model** (image + text) to produce a JSON campaign plan
+3. Calls **Gemini Vision** (image + text) to produce a JSON campaign plan
 
-**LLM used:** Groq vision (`meta-llama/llama-4-scout-17b-16e-instruct`).
+**LLM used:** Gemini Vision (`gemini-2.5-flash`).
 
 **Output — `campaign_plan`:**
 
@@ -244,6 +229,59 @@ test_api.py                   ← End-to-end API test script (project root)
   "target_audience_hint": "Affluent adults aged 28-50 interested in luxury lifestyle",
   "budget": 500.0,
   "currency": "USD"
+}
+```
+
+---
+
+### Node 1.5 — `strategy_node` (the Strategist) (`nodes/strategy.py`)
+
+**Role:** Builds the customized marketing plan — **who** to target and **when** to
+reach them. Runs sequentially right after the orchestrator and *before* the
+creative/media fan-out, so its persona and messaging angles feed those sub-agents.
+
+**How it works:**
+
+1. Reads `campaign_plan`, `goal`, `budget`, `language`
+2. *(Optional)* pulls live trends via web search when `ENABLE_WEB_SEARCH=true`
+3. Calls **Groq** with a curated dayparting reference to produce the persona,
+   channels, peak windows, cadence, and messaging angles
+4. Deterministic post-processing (`strategy_tools.py`): resolves the audience
+   timezone, formats the peak windows into Meta's `adset_schedule`, and computes
+   a best `start_time`
+
+**Tools (`strategy_tools.py`):** dayparting knowledge base · timezone resolver ·
+Meta schedule formatter · optional DuckDuckGo web search · strategy-context builder.
+
+**Design choices baked in:** placement is sequential (feeds creative/media); the
+schedule is **advisory/display-only** (the campaign keeps a daily budget); the
+persona **overrides** media-buying's audience in `merge_node`; it runs
+automatically (no review step) and is shown in the final summary card.
+
+**LLM used:** Groq (`llama-3.3-70b-versatile`). Gemini is not used here.
+
+**Output — `strategy_output`:**
+
+```json
+{
+  "target_persona": {
+    "primary_segment": "Young women, students & early-career",
+    "gender": "female", "age_min": 16, "age_max": 26,
+    "interests": ["beauty", "fragrance"], "locations": ["EG"]
+  },
+  "channels": {"primary": ["instagram", "tiktok"], "secondary": ["facebook"]},
+  "timezone": "Africa/Cairo",
+  "schedule": {
+    "peak_windows": [
+      {"label": "weeknight scroll", "days": ["Sun", "Mon"], "start": "22:30", "end": "01:30"}
+    ],
+    "meta_adset_schedule": [{"days": [0, 1], "start_minute": 1350, "end_minute": 1439}],
+    "best_single_start_time": "2026-06-22T22:30:00+02:00",
+    "enforced_on_meta": false
+  },
+  "cadence": {"ads_per_week": 5, "flight_days": 14},
+  "messaging_angles": ["smell amazing for less"],
+  "rationale": "Young women in Egypt, most active late nights and weekend mornings."
 }
 ```
 
@@ -365,9 +403,11 @@ When the regeneration limit is exceeded (or the user asks to "see all versions")
 
 **Phase 2 — Text Review (single interrupt):**
 
-- User approves or provides a single feedback string
-- Approved → `review_stage = "done"` → graph proceeds to `merge_node`
-- Rejected → `review_stage = "redo_creative"` → graph loops back to `creative_node` with the feedback stored in state
+- The user picks ONE of the generated copies and ONE of the headlines, and may
+  edit either text manually
+- The chosen (possibly edited) copy/headline are moved to the front of the
+  creative so they're the primary text used everywhere downstream
+- Always proceeds to `merge_node` (`review_stage = "done"`)
 
 **Interrupt payloads:**
 
@@ -377,7 +417,8 @@ Image review:   {"stage": "image_review", "images": ["<b64>"], "regen_count": 0,
 Resume with:    {"approved": [true], "feedback": {0: "make it brighter"}}
 
 Text review:    {"stage": "text_review", "copies": [...], "headlines": [...], "cta": "..."}
-Resume with:    {"approved": false, "feedback": "Make the tone more urgent"}
+Resume with:    {"copy_index": 1, "headline_index": 2,
+                 "copy_text": "final copy…", "headline_text": "final headline…"}
 
 Max regens:     {"stage": "max_regenerations_exceeded", "image_history": ["<b64>", ...], "message": "..."}
 Resume with:    {"chosen_index": 0}
@@ -648,9 +689,9 @@ Call Groq llama-3.3-70b-versatile
 
 ### `call_llm_vision(image_path, prompt, system_prompt)` — Image + text
 
-Used by `orchestrator_node` and `question_generator_node`. Runs on Groq's
-vision model (`meta-llama/llama-4-scout-17b-16e-instruct`); the image is
-downscaled and sent as a base64 data URL.
+Used by the adaptive interview (`question_gen_node`) and `orchestrator_node`.
+Image understanding runs on **Gemini** (`gemini-2.5-flash`, multimodal) — the PIL
+image is passed straight to the SDK.
 
 ### `generate_ad_images(prompt, n)` — Image generation
 
@@ -705,8 +746,8 @@ goal                                                        errors
 | `image_mode` | `str` | api.py (`/start`) | `"use_original"` or `"enhance_with_ai"` |
 | `budget` | `float` | api.py (`/start`) | Total campaign budget in USD |
 | `goal` | `str` | api.py (`/start`) | Free-text campaign objective |
-| `questions` | `list[str]` | question_generator_node | 4 product-specific questions |
-| `user_answers` | `dict` | question_generator_node | Answers keyed by index string |
+| `questions` | `list[str]` | question_gen_node | Questions asked so far (grows one at a time) |
+| `user_answers` | `dict` | question_ask_node | Answers keyed by index string |
 | `campaign_plan` | `dict` | orchestrator_node | Platform, objective, tone, etc. |
 | `creative_output` | `dict` | creative_node | Copies, headlines, CTA, images |
 | `media_output` | `dict` | media_buying_node | Budget split, targeting, bid strategy |
@@ -730,7 +771,7 @@ one the API exposes:
 | `questions` | Generated questions, asked one at a time | `POST /session/{id}/answers` |
 | `image_review` | Ad image with approve / regenerate / "see all versions" | `POST /session/{id}/image-decision` |
 | `max_regenerations_exceeded` | Gallery of the original photo + every previously generated image | `POST /session/{id}/pick-image` |
-| `text_review` | Copies, headlines, CTA with approve / edit | `POST /session/{id}/text-decision` |
+| `text_review` | Pick 1 of 3 copies + 1 of 3 headlines, edit inline | `POST /session/{id}/text-decision` |
 | `done` | Full campaign bundle + ad preview + publish button | `POST /session/{id}/publish` |
 
 Run it with `cd ../web && npm install && npm run dev` (configure
@@ -885,8 +926,8 @@ The full pipeline makes up to **6 LLM calls per run** (more on redo passes):
 
 | Call | Provider | Notes |
 | --- | --- | --- |
-| `question_generator_node` | Groq vision | 1 call |
-| `orchestrator_node` | Groq vision | 1 call |
+| adaptive interview (per question) | Gemini Vision | `NUM_QUESTIONS` calls (default 4) |
+| `orchestrator_node` | Gemini Vision | 1 call |
 | `strategy_node` | Groq (+ optional web search) | 1 call |
 | `creative_node` (text) | Groq | 1 call per run |
 | `creative_node` (image) | Gemini 3.1 Flash Image | 1 call; only in `enhance_with_ai` mode |
@@ -894,7 +935,8 @@ The full pipeline makes up to **6 LLM calls per run** (more on redo passes):
 
 | Provider | Free Tier Limit | Behavior When Hit |
 | --- | --- | --- |
-| Groq llama-3.3-70b / llama-4-scout | ~30 RPM | Raises `RuntimeError` |
+| Groq llama-3.3-70b (text) | ~30 RPM | Raises `RuntimeError` |
+| Gemini 2.5 Flash (vision) | Billing/quota-dependent | Falls back to a generic question / empty plan |
 | Gemini 3.1 Flash Image | Billing-dependent | `generated_images` set to `[]`, pipeline continues |
 
 ---

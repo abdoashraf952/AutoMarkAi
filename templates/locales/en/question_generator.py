@@ -1,54 +1,53 @@
-"""English question-generator prompts — keyed by marketing_type."""
+"""English question-generator prompts — adaptive, one question at a time.
+
+The model receives the product image, the goal, and the conversation so far, and
+returns the single most useful NEXT question. Output is JSON: {"question": "..."}.
+"""
+
+_BASE = (
+    "You will receive a {kind} image, a campaign goal, and the conversation so far "
+    "(questions already asked and their answers).\n"
+    "Ask the SINGLE most useful NEXT question that, together with what you already "
+    "know, will help a copywriter craft a high-converting ad.\n"
+    "Build on the previous answers — go deeper, fill gaps, never repeat what's known.\n"
+    "Across the whole interview, aim to cover: {coverage}.\n"
+    "The question must be specific to THIS {kind} (use what you see in the image), "
+    "open-ended (not yes/no), and easy for the owner to answer.\n"
+    'Return ONLY a JSON object: {{"question": "<your question>"}}. No markdown, no extra text.'
+)
 
 SYSTEM: dict[str, str] = {
-    "product": (
-        "You are a senior marketing research analyst specialising in consumer products.\n"
-        "You will receive a product image and a campaign goal.\n"
-        "Generate 5-6 sharp, specific questions that — when answered — will give a copywriter "
-        "everything needed to craft a high-converting ad.\n"
-        "Cover: ideal customer profile, primary benefit, pain point solved, competitive differentiator, "
-        "pricing / promotions, and purchase channel.\n"
-        "Return ONLY a valid JSON array of question strings. No markdown, no explanation.\n"
-        'Example: ["Who is the primary customer — age, lifestyle, buying motivation?", ...]'
+    "product": _BASE.format(
+        kind="product",
+        coverage="ideal customer, primary benefit, pain point solved, competitive "
+        "differentiator, pricing/promotions, and purchase channel",
     ),
-    "business": (
-        "You are a senior marketing research analyst specialising in local and SME businesses.\n"
-        "You will receive a business image and a campaign goal.\n"
-        "Generate 5-6 sharp, specific questions that will help craft a compelling business awareness "
-        "or lead-generation ad.\n"
-        "Cover: core offerings, ideal customer, unique value proposition, trust signals, "
-        "current promotions or events, and the desired customer action.\n"
-        "Return ONLY a valid JSON array of question strings. No markdown, no explanation."
+    "business": _BASE.format(
+        kind="business",
+        coverage="core offerings, ideal customer, unique value proposition, trust "
+        "signals, current promotions/events, and the desired customer action",
     ),
-    "service": (
-        "You are a senior marketing research analyst specialising in service businesses.\n"
-        "You will receive a service-related image and a campaign goal.\n"
-        "Generate 5-6 sharp, specific questions that will help craft an ad focused on outcomes and trust.\n"
-        "Cover: service scope, ideal client profile, transformation/result promised, "
-        "biggest client objection, pricing model, and geographic reach.\n"
-        "Return ONLY a valid JSON array of question strings. No markdown, no explanation."
+    "service": _BASE.format(
+        kind="service",
+        coverage="service scope, ideal client, transformation/result promised, the "
+        "biggest client objection, pricing model, and geographic reach",
     ),
 }
+
+_USER = (
+    "Campaign Goal: {goal}\n\n"
+    "{qa_context}\n\n"
+    "Ask question {index} of {total}. "
+    'Return ONLY {{"question": "<the single next question>"}}.'
+)
 
 USER_TEMPLATE: dict[str, str] = {
-    "product": (
-        "Analyze the product image and generate 5-6 targeted research questions.\n\n"
-        "Campaign Goal: {goal}\n\n"
-        "Return a JSON array of 5-6 questions. Each question must be specific to THIS product, "
-        "not generic. Avoid yes/no questions."
-    ),
-    "business": (
-        "Analyze the business image and generate 5-6 targeted research questions.\n\n"
-        "Campaign Goal: {goal}\n\n"
-        "Return a JSON array of 5-6 questions specific to THIS business. Avoid yes/no questions."
-    ),
-    "service": (
-        "Analyze the service image and generate 5-6 targeted research questions.\n\n"
-        "Campaign Goal: {goal}\n\n"
-        "Return a JSON array of 5-6 questions specific to THIS service. Avoid yes/no questions."
-    ),
+    "product": _USER,
+    "business": _USER,
+    "service": _USER,
 }
 
+# Used when generation fails for a given index (index-aligned with the interview).
 FALLBACK_QUESTIONS: dict[str, list[str]] = {
     "product": [
         "Who is the ideal customer — describe their age, lifestyle, and buying motivation?",

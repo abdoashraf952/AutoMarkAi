@@ -12,7 +12,11 @@ from nodes.creative import creative_node
 from nodes.media_buying import media_buying_node
 from nodes.merge import merge_node
 from nodes.orchestrator import orchestrator_node
-from nodes.question_generator import question_generator_node
+from nodes.question_generator import (
+    question_ask_node,
+    question_gen_node,
+    route_after_answer,
+)
 from nodes.review import (
     image_pick_node,
     image_regen_node,
@@ -63,7 +67,8 @@ def get_pipeline_graph():
 
     Topology:
         START
-          -> question_generator_node   [interrupt: questions]
+          -> question_gen_node         [generate next question, Gemini vision]
+          -> question_ask_node         [interrupt: questions]  --loop--> question_gen_node
           -> orchestrator_node
           -> strategy_node             [persona + channels + dayparting]
           -> fan-out (Send):
@@ -85,7 +90,8 @@ def get_pipeline_graph():
     """
     builder = StateGraph(CampaignState)
 
-    builder.add_node("question_generator_node", question_generator_node)
+    builder.add_node("question_gen_node", question_gen_node)
+    builder.add_node("question_ask_node", question_ask_node)
     builder.add_node("orchestrator_node", orchestrator_node)
     builder.add_node("strategy_node", strategy_node)
     builder.add_node("creative_node", creative_node)
@@ -96,8 +102,14 @@ def get_pipeline_graph():
     builder.add_node("text_review_node", text_review_node)
     builder.add_node("merge_node", merge_node)
 
-    builder.set_entry_point("question_generator_node")
-    builder.add_edge("question_generator_node", "orchestrator_node")
+    # Adaptive interview: gen → ask → (loop) → orchestrator
+    builder.set_entry_point("question_gen_node")
+    builder.add_edge("question_gen_node", "question_ask_node")
+    builder.add_conditional_edges(
+        "question_ask_node",
+        route_after_answer,
+        ["question_gen_node", "orchestrator_node"],
+    )
 
     # orchestrator -> strategy_node -> fan-out (so creative/media can use the persona)
     builder.add_conditional_edges(
