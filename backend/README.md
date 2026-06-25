@@ -27,12 +27,14 @@ It asks you 4 product-specific questions, lets you review and approve the genera
 
 ## Two Ways to Run
 
-The project is split into a **FastAPI backend** (this folder) and a **Next.js frontend** (`../web`).
+The project is split into a **FastAPI backend** (this folder) and a **Next.js frontend** (`../frontend`).
 
-| Mode | Command | Features |
+All Python commands below are run from the **project root** — the folder that contains `AutoMarkAi/` (it also holds `.env`), because the backend is imported as the `AutoMarkAi.backend` package.
+
+| Mode | Command (run from the project root) | Features |
 | --- | --- | --- |
-| **FastAPI + Next.js** (primary) | `uvicorn api:app --reload --port 8000` then `cd ../web && npm run dev` | Full conversational flow — Q&A, image review, copy review, Meta publish |
-| **CLI** (fallback) | `python main.py --image X --budget Y --goal Z` | Single invocation, no review steps, no publish |
+| **FastAPI + Next.js** (primary) | `uvicorn AutoMarkAi.backend.api:app --reload --port 8000` then `cd AutoMarkAi/frontend && npm run dev` | Full conversational flow — Q&A, image review, copy review, Meta publish |
+| **CLI** (fallback) | `python -m AutoMarkAi.backend.main --image X --budget Y --goal Z` | Single invocation, no review steps, no publish |
 
 ---
 
@@ -467,13 +469,13 @@ Resume with:    {"chosen_index": 0}
 
 ## FastAPI Backend (`api.py`)
 
-`api.py` exposes the full pipeline as a REST API with SSE streaming. It is the interface the Next.js frontend (`../web`) connects to. Internally it drives the LangGraph defined in `pipeline_graph.py` — all nodes, interrupts, and checkpointing live there.
+`api.py` exposes the full pipeline as a REST API with SSE streaming. It is the interface the Next.js frontend (`../frontend`) connects to. Internally it drives the LangGraph defined in `pipeline_graph.py` — all nodes, interrupts, and checkpointing live there.
 
 ### Starting the server
 
 ```bash
-cd AutoMarkAi
-uvicorn api:app --reload --port 8000
+# From the project root (the folder containing AutoMarkAi/)
+uvicorn AutoMarkAi.backend.api:app --reload --port 8000
 ```
 
 Interactive docs (Swagger UI): `http://localhost:8000/docs`
@@ -577,12 +579,10 @@ pip install Pillow requests
 ### Usage
 
 ```bash
-# Terminal 1 — start the server
-cd AutoMarkAi
-uvicorn api:app --reload --port 8000
+# Terminal 1 — start the server (from the project root)
+uvicorn AutoMarkAi.backend.api:app --reload --port 8000
 
-# Terminal 2 — run the full test
-cd ..                        # back to project root
+# Terminal 2 — run the full test (also from the project root)
 python test_api.py
 ```
 
@@ -759,9 +759,9 @@ goal                                                        errors
 
 ---
 
-## Frontend (Next.js — `../web`)
+## Frontend (Next.js — `../frontend`)
 
-The user-facing app is a conversational (chatbot) Next.js front-end in `../web`
+The user-facing app is a conversational (chatbot) Next.js front-end in `../frontend`
 that drives this backend over HTTP + SSE. It decomposes the backend's coarse
 stages into fine conversational phases, but the **stage contract is the same**
 one the API exposes:
@@ -774,23 +774,23 @@ one the API exposes:
 | `text_review` | Pick 1 of 3 copies + 1 of 3 headlines, edit inline | `POST /session/{id}/text-decision` |
 | `done` | Full campaign bundle + ad preview + publish button | `POST /session/{id}/publish` |
 
-Run it with `cd ../web && npm install && npm run dev` (configure
-`NEXT_PUBLIC_API_BASE` in `web/.env.local`). See `../web/README.md` for details.
+Run it with `cd ../frontend && npm install && npm run dev` (configure
+`NEXT_PUBLIC_API_BASE` in `frontend/.env.local`). See `../frontend/README.md` for details.
 
 ---
 
 ## Setup
 
 ```bash
-# 1. Enter the project directory
-cd AutoMarkAi
+# 1. Enter the project root (the folder containing AutoMarkAi/)
+cd FinalProject_AutoMarkAI        # or wherever you cloned it
 
 # 2. (Optional) Create a virtual environment
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate         # Windows: .venv\Scripts\activate
 
 # 3. Install dependencies
-pip install -r requirements.txt
+pip install -r AutoMarkAi/backend/requirements.txt
 
 # 4. Copy the env template and fill in your API keys
 cp .env.example .env
@@ -861,16 +861,16 @@ Copy `.env.example` to `.env` and configure:
 
 ## Running the Backend + Frontend
 
-Start the API:
+Start the API (from the project root — the folder containing `AutoMarkAi/`):
 
 ```bash
-uvicorn api:app --reload --port 8000
+uvicorn AutoMarkAi.backend.api:app --reload --port 8000
 ```
 
 Then start the Next.js frontend in a second terminal:
 
 ```bash
-cd ../web
+cd AutoMarkAi/frontend
 npm install
 npm run dev          # opens http://localhost:3000
 ```
@@ -886,8 +886,9 @@ The frontend guides you through every stage (Q&A → image review → copy revie
 ## Running the CLI (fallback)
 
 ```bash
-python main.py \
-  --image ./tests/sample_input/watch.jpg \
+# From the project root (the folder containing AutoMarkAi/)
+python -m AutoMarkAi.backend.main \
+  --image AutoMarkAi/backend/tests/sample_input/watch.jpg \
   --budget 500 \
   --goal "get WhatsApp leads for luxury watch"
 ```
@@ -907,7 +908,8 @@ The CLI skips question generation, review steps, and Meta publishing. On success
 ## Running Tests
 
 ```bash
-pytest tests/ -v
+# From the project root (the folder containing AutoMarkAi/)
+pytest AutoMarkAi/backend/tests -v
 ```
 
 All tests mock all LLM, image generation, and Meta API calls — **no API keys required**.
@@ -956,7 +958,7 @@ The full pipeline makes up to **6 LLM calls per run** (more on redo passes):
 2. Wire it into `pipeline_graph.py`
 3. Add a new `POST /session/{id}/my-decision` endpoint in `api.py` (FastAPI)
 4. Call `_assert_stage(session, "my_stage")` and `_advance(session, Command(resume=...))` inside it
-5. Handle the new stage in the Next.js frontend (`../web`)
+5. Handle the new stage in the Next.js frontend (`../frontend`)
 
 **Change the image generation model:**
 
@@ -984,11 +986,11 @@ The full pipeline makes up to **6 LLM calls per run** (more on redo passes):
 The API is a standard ASGI app — deploy with any ASGI-compatible host:
 
 ```bash
-# Production server (no --reload)
-uvicorn api:app --host 0.0.0.0 --port 8000 --workers 1
+# Production server (no --reload) — run from the project root
+uvicorn AutoMarkAi.backend.api:app --host 0.0.0.0 --port 8000 --workers 1
 
 # With gunicorn + uvicorn workers
-gunicorn api:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+gunicorn AutoMarkAi.backend.api:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
 > Use `--workers 1` — the in-memory session store is not shared between processes. For multi-worker deployments, replace `_sessions` with a Redis-backed store.

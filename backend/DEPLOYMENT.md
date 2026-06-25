@@ -130,7 +130,7 @@ You already have Docker intuition, so this is your comfort zone. We package the
 FastAPI app into an **image** (a frozen, runnable snapshot). Anywhere that can
 run Docker can then run your backend identically.
 
-Work inside the backend folder: `AutoMarkAi/`.
+Work at the **repo root**: `AutoMarkAi/` (it holds `backend/` and `frontend/`). The Docker files below live here, and `docker build` runs from here. The image is built so the code lands at `/app/AutoMarkAi/backend/…`, because the backend is imported as the `AutoMarkAi.backend` package.
 
 ### 3a. Create `AutoMarkAi/Dockerfile`
 
@@ -142,14 +142,16 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# /app is the import root; code is imported as the `AutoMarkAi.backend` package,
+# so it must live under /app/AutoMarkAi/backend/…
 WORKDIR /app
 
 # Install dependencies first (this layer is cached unless requirements change)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt ./AutoMarkAi/backend/requirements.txt
+RUN pip install --no-cache-dir -r AutoMarkAi/backend/requirements.txt
 
-# Copy the rest of the backend source
-COPY . .
+# Copy the repo in under AutoMarkAi/ so `AutoMarkAi.backend` resolves
+COPY . ./AutoMarkAi/
 
 # Run as a non-root user (good security hygiene)
 RUN useradd --create-home appuser && chown -R appuser /app
@@ -158,8 +160,9 @@ USER appuser
 # The app listens on 8000
 EXPOSE 8000
 
-# 0.0.0.0 = accept connections from outside the container
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# 0.0.0.0 = accept connections from outside the container.
+# Module path matches the package layout (run from /app).
+CMD ["uvicorn", "AutoMarkAi.backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ### 3b. Create `AutoMarkAi/.dockerignore`
@@ -168,14 +171,19 @@ This keeps junk — **and secrets** — out of the image.
 
 ```
 .env
-__pycache__/
+.git/
+frontend/
+**/__pycache__/
 *.pyc
-tests/
+backend/tests/
 output/
 .pytest_cache/
 .venv/
 venv/
 ```
+
+> The backend image doesn't need the Next.js app, so `frontend/` is excluded —
+> it deploys separately to Vercel (§10).
 
 > ⚠️ **Critical:** `.env` is in `.dockerignore` on purpose. **Never bake API keys
 > into an image.** Images get pushed to registries and shared; a leaked image =
@@ -303,8 +311,8 @@ server $ docker compose version                # the Compose plugin comes with i
 ### 7a. Bring the code over (Git is easiest)
 
 ```
-server $ git clone https://github.com/YOU/your-repo.git
-server $ cd your-repo/AutoMarkAi
+server $ git clone https://github.com/YOU/AutoMarkAi.git
+server $ cd AutoMarkAi          # repo root — holds backend/, frontend/, Dockerfile, docker-compose.yml
 ```
 
 (No GitHub repo yet? Push your project to GitHub first — you'll need it for
@@ -432,7 +440,7 @@ on the internet. 🎉
 
 1. Push the whole project to **GitHub** (if you haven't).
 2. Go to <https://vercel.com> → *Add New Project* → import your repo.
-3. **Root Directory:** set it to `web` (your Next.js app lives there, not the
+3. **Root Directory:** set it to `frontend` (your Next.js app lives there, not the
    repo root).
 4. **Environment Variables:** add
    `NEXT_PUBLIC_API_BASE = https://api.yourdomain.com`
@@ -452,8 +460,8 @@ Go back and set `allow_origins=["https://automark-xxxx.vercel.app"]` in
 `api.py` (§4), commit, and on the server:
 
 ```
-server $ cd ~/your-repo && git pull
-server $ cd AutoMarkAi && docker compose up -d --build
+server $ cd ~/AutoMarkAi && git pull
+server $ docker compose up -d --build
 ```
 
 ---
@@ -479,8 +487,8 @@ Frontend: just `git push` → Vercel redeploys automatically.
 
 Backend:
 ```
-server $ cd ~/your-repo && git pull
-server $ cd AutoMarkAi && docker compose up -d --build
+server $ cd ~/AutoMarkAi && git pull
+server $ docker compose up -d --build
 ```
 
 > 🧠 **Intuition:** `up -d --build` rebuilds the image with new code and swaps the
@@ -697,7 +705,7 @@ streaming app. Here's the wider landscape so you understand your options:
 - [ ] Point `api.yourdomain.com` DNS → Elastic IP
 - [ ] `docker-compose.yml` + `Caddyfile` → `docker compose up -d --build`
 - [ ] Verify `https://api.yourdomain.com/health`
-- [ ] Deploy frontend on Vercel (root = `web`, set `NEXT_PUBLIC_API_BASE`)
+- [ ] Deploy frontend on Vercel (root = `frontend`, set `NEXT_PUBLIC_API_BASE`)
 - [ ] Lock CORS to the Vercel domain, rebuild backend
 - [ ] Full end-to-end test
 ```

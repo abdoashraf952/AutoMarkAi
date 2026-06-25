@@ -41,17 +41,16 @@ blocking POST is in flight.
 
 ## Run it
 
-**1. Start the backend** (from the repo root):
+**1. Start the backend** (from the project root — the folder containing `AutoMarkAi/`):
 
 ```bash
-cd AutoMarkAi
-uvicorn api:app --reload --port 8000
+uvicorn AutoMarkAi.backend.api:app --reload --port 8000
 ```
 
 **2. Start the web app** (in a second terminal):
 
 ```bash
-cd web
+cd AutoMarkAi/frontend
 cp .env.local.example .env.local   # adjust NEXT_PUBLIC_API_BASE if needed
 npm install
 npm run dev
@@ -68,7 +67,7 @@ Open <http://localhost:3000>.
 ## Project structure
 
 ```
-web/
+frontend/
 ├── app/
 │   ├── layout.tsx          ← root layout + aurora background + fonts
 │   ├── page.tsx            ← header, progress rail, chat window, composer
