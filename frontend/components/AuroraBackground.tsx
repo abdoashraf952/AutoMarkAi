@@ -13,7 +13,7 @@ export default function AuroraBackground() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(120% 120% at 50% 0%, #0c0f24 0%, #05060f 60%)",
+            "radial-gradient(120% 120% at 50% 0%, #131c38 0%, #070b1a 62%)",
         }}
       />
 

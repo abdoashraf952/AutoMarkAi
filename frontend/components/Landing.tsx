@@ -21,19 +21,19 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         transition={{ delay: 0.1 }}
         className="max-w-2xl text-4xl font-bold leading-tight sm:text-5xl"
       >
-        From a single photo to a <span className="accent-gradient-text">published Meta ad</span> —
-        just by chatting.
+        Your own ad, <span className="accent-gradient-text">ready to go</span> — just
+        answer a few simple questions.
       </motion.h1>
 
       <motion.p
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="mt-5 max-w-xl text-base text-white/55"
+        className="mt-5 max-w-xl text-base text-white/60"
       >
-        Meet <span className="font-semibold text-white">Mark</span>, your AI media buyer. Upload a
-        product photo, set a budget, and Mark walks you through questions, visuals, and copy —
-        step by step — then publishes it for you.
+        Meet <span className="font-semibold text-white">Mark</span>, your friendly ad helper.
+        Share a photo (or let AI make one), pick a budget, and Mark guides you the rest of the way —
+        in plain language, no marketing experience needed.
       </motion.p>
 
       <motion.div
@@ -42,7 +42,7 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         transition={{ delay: 0.3 }}
         className="mt-7 flex flex-wrap items-center justify-center gap-2"
       >
-        {["📸 Smart questions", "🎨 AI visuals", "✍️ Ad copy", "🚀 One-tap publish"].map((c) => (
+        {["💬 Simple questions", "🖼️ Pictures made for you", "✍️ Words that sell", "🚀 Publish in one tap"].map((c) => (
           <span key={c} className="chip">
             {c}
           </span>
@@ -58,8 +58,17 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         onClick={onStart}
         className="btn-primary mt-9 px-8 py-4 text-base"
       >
-        Start your campaign →
+        Let's make my ad →
       </motion.button>
+
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.55 }}
+        className="mt-4 text-xs text-white/40"
+      >
+        Takes about 2 minutes · Nothing goes live until you say so
+      </motion.p>
     </main>
   );
 }

@@ -2,7 +2,7 @@
 
 import logging
 
-from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm_vision
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, analyze_visual
 from AutoMarkAi.backend.i18n import get_orchestrator_prompts
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,10 @@ def orchestrator_node(state: dict) -> dict:
             qa_context=qa_context,
         )
 
-        raw = call_llm_vision(state["image_path"], prompt, system)
+        raw = analyze_visual(
+            state.get("image_path"), prompt, system,
+            description=state.get("product_description"),
+        )
         campaign_plan = _parse_json_with_retry(raw)
 
         # Inject language and marketing_type into the plan so downstream nodes can use them

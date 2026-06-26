@@ -47,6 +47,20 @@ def get_question_prompts(
     )
 
 
+def get_target_prompts(
+    language: str = DEFAULT_LANGUAGE,
+    marketing_type: str = DEFAULT_MARKETING_TYPE,
+) -> tuple[str, str, list[dict]]:
+    """Return (TARGET_SYSTEM, TARGET_USER_TEMPLATE, TARGET_FALLBACK_OPTIONS)
+    for the always-asked campaign-target question."""
+    mod = _load("question_generator", language)
+    return (
+        _pick(mod.TARGET_SYSTEM, marketing_type),
+        _pick(mod.TARGET_USER_TEMPLATE, marketing_type),
+        _pick(mod.TARGET_FALLBACK_OPTIONS, marketing_type),
+    )
+
+
 def get_orchestrator_prompts(
     language: str = DEFAULT_LANGUAGE,
     marketing_type: str = DEFAULT_MARKETING_TYPE,

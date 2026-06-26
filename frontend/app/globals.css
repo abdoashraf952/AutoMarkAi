@@ -18,12 +18,24 @@ body {
 }
 
 body {
-  background: #05060f;
-  color: #e6e7f0;
+  background: #070b1a;
+  color: #e8eaf5;
   font-family: var(--font-geist);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden; /* the chat column scrolls, not the page */
+}
+
+/* Remove number-input spinner arrows (budget field). */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* ----- Glassmorphism primitives ----------------------------------- */
@@ -51,7 +63,7 @@ body {
   }
 
   .accent-gradient-text {
-    background: linear-gradient(100deg, #c4b5ff 0%, #7c5cff 40%, #22d3ee 100%);
+    background: linear-gradient(100deg, #a5b4fc 0%, #6366f1 42%, #2dd4bf 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -60,12 +72,12 @@ body {
   /* Glowing primary button */
   .btn-primary {
     @apply relative inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white transition-all duration-200;
-    background: linear-gradient(100deg, #7c5cff 0%, #9b6bff 50%, #22d3ee 140%);
-    box-shadow: 0 8px 30px -8px rgba(124, 92, 255, 0.7);
+    background: linear-gradient(100deg, #6366f1 0%, #818cf8 50%, #2dd4bf 140%);
+    box-shadow: 0 8px 30px -8px rgba(99, 102, 241, 0.7);
   }
   .btn-primary:hover {
     transform: translateY(-1px);
-    box-shadow: 0 12px 40px -8px rgba(124, 92, 255, 0.9);
+    box-shadow: 0 12px 40px -8px rgba(99, 102, 241, 0.9);
   }
   .btn-primary:active {
     transform: translateY(0);
@@ -89,8 +101,14 @@ body {
     @apply w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/40 outline-none transition-all duration-200;
   }
   .field:focus {
-    border-color: rgba(124, 92, 255, 0.6);
-    box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.15);
+    border-color: rgba(99, 102, 241, 0.6);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+  }
+
+  /* "Recommended" pill used on the campaign-target options */
+  .badge-rec {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink-950;
+    background: linear-gradient(100deg, #fbbf24 0%, #fcd34d 100%);
   }
 }
 

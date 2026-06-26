@@ -4,6 +4,7 @@
 
 /** Backend interrupt stages (the `stage` field returned by the API). */
 export type BackendStage =
+  | "campaign_target"
   | "questions"
   | "image_review"
   | "max_regenerations_exceeded"
@@ -11,8 +12,17 @@ export type BackendStage =
   | "done";
 
 export type MarketingType = "product" | "business" | "service";
-export type ImageMode = "use_original" | "enhance_with_ai";
+/** "generate_with_ai" is used when the user skips the photo upload. */
+export type ImageMode = "use_original" | "enhance_with_ai" | "generate_with_ai";
 export type Language = "en" | "ar";
+
+/** One AI-ranked campaign-goal option (campaign_target interrupt). */
+export interface TargetOption {
+  label: string;
+  description: string;
+  goal: string; // natural-language goal sentence sent back as the answer
+  recommended: boolean;
+}
 
 /** Common envelope returned by /start, /answers, /image-decision, etc. */
 export interface StageResponse {
@@ -24,10 +34,14 @@ export interface StageResponse {
 export interface InterruptData {
   stage?: BackendStage;
   marketing_type?: MarketingType;
-  // questions (adaptive — one at a time)
+  // campaign_target (the one fixed question — ranked multiple choice)
+  options?: TargetOption[];
+  // questions (adaptive — one at a time, dynamic count)
   question?: string;
   index?: number;
   total?: number;
+  min?: number;
+  max?: number;
   questions?: string[]; // legacy/batch (no longer used by the UI)
   // image_review
   images?: string[]; // placeholders like "<image_0>"
@@ -54,12 +68,12 @@ export interface ImagesResponse {
 }
 
 export interface SetupData {
-  goal: string;
   budget: number;
   imageMode: ImageMode;
   marketingType: MarketingType;
   language: Language;
-  imageFile: File;
+  imageFile?: File; // optional — omitted when the user lets AI generate the image
+  description?: string; // owner's typed description; required when imageFile is omitted
 }
 
 export interface ImageDecisionBody {

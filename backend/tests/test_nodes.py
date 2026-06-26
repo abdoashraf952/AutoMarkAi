@@ -36,7 +36,7 @@ def test_orchestrator_returns_valid_campaign_plan():
         "goal": "get WhatsApp leads for luxury watch",
     }
 
-    with patch("nodes.orchestrator.call_llm_vision", return_value=json.dumps(mock_plan)):
+    with patch("AutoMarkAi.backend.nodes.orchestrator.analyze_visual", return_value=json.dumps(mock_plan)):
         result = orchestrator_node(state)
 
     assert "campaign_plan" in result
@@ -86,9 +86,9 @@ def test_creative_node_returns_three_copies():
         "image_mode": "enhance_with_ai",
     }
 
-    with patch("nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "gemini")):
+    with patch("AutoMarkAi.backend.nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "gemini")):
         with patch(
-            "nodes.creative.generate_ad_images",
+            "AutoMarkAi.backend.nodes.creative.generate_ad_images",
             return_value=["b64_img_1", "b64_img_2", "b64_img_3"],
         ):
             result = creative_node(state)
@@ -136,7 +136,7 @@ def test_media_buying_budget_split_sums_to_one():
         "goal": "get WhatsApp leads",
     }
 
-    with patch("nodes.media_buying.call_llm", return_value=(json.dumps(mock_media), "gemini")):
+    with patch("AutoMarkAi.backend.nodes.media_buying.call_llm", return_value=(json.dumps(mock_media), "gemini")):
         result = media_buying_node(state)
 
     assert "media_output" in result
@@ -208,12 +208,12 @@ def test_merge_node_cta_coherence_fix():
 
 
 # ---------------------------------------------------------------------------
-# Test 5: call_llm always uses Groq (Gemini is reserved for image generation)
+# Test 5: call_llm honours the configured provider (LLM_PROVIDER)
 # ---------------------------------------------------------------------------
 
-def test_call_llm_uses_groq():
-    """call_llm must generate text via Groq — Gemini is image-generation only."""
-    from AutoMarkAi.backend.llm_client import call_llm
+def test_call_llm_uses_groq_when_configured():
+    """With LLM_PROVIDER=groq, call_llm generates via Groq using gpt-oss-120b."""
+    import AutoMarkAi.backend.llm_client as lc
 
     mock_groq_message = MagicMock()
     mock_groq_message.content = '{"result": "from groq"}'
@@ -222,13 +222,27 @@ def test_call_llm_uses_groq():
     mock_groq_response = MagicMock()
     mock_groq_response.choices = [mock_groq_choice]
 
-    with patch(
-        "llm_client._groq_client.chat.completions.create",
+    with patch.object(lc, "LLM_PROVIDER", "groq"), patch(
+        "AutoMarkAi.backend.llm_client._groq_client.chat.completions.create",
         return_value=mock_groq_response,
     ) as mock_create:
-        text, provider = call_llm("test prompt", "system prompt", "test_node")
+        text, provider = lc.call_llm("test prompt", "system prompt", "test_node")
 
     assert provider == "groq", f"Expected 'groq', got '{provider}'"
     assert "groq" in text
-    # The Groq vision/text model is what's called — never Gemini.
     assert mock_create.call_count == 1
+    assert mock_create.call_args.kwargs["model"] == lc.GROQ_TEXT_MODEL == "openai/gpt-oss-120b"
+
+
+def test_call_llm_uses_gemini_by_default():
+    """With LLM_PROVIDER=gemini (default), call_llm generates via Gemini text."""
+    import AutoMarkAi.backend.llm_client as lc
+
+    with patch.object(lc, "LLM_PROVIDER", "gemini"), patch.object(
+        lc, "_gemini_text", return_value='{"result": "from gemini"}'
+    ) as mock_gem:
+        text, provider = lc.call_llm("test prompt", "system prompt", "test_node")
+
+    assert provider == "gemini"
+    assert "gemini" in text
+    assert mock_gem.call_count == 1

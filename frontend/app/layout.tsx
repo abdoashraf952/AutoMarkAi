@@ -4,13 +4,13 @@ import "./globals.css";
 import AuroraBackground from "@/components/AuroraBackground";
 
 export const metadata: Metadata = {
-  title: "AutoMark AI — Conversational Campaign Studio",
+  title: "AutoMark AI — Your friendly ad helper",
   description:
-    "Chat your way from a single product photo to a published Meta ad campaign.",
+    "Answer a few simple questions and AutoMark turns your idea into a ready-to-publish ad — no marketing experience needed.",
 };
 
 export const viewport: Viewport = {
-  themeColor: "#05060f",
+  themeColor: "#070b1a",
   width: "device-width",
   initialScale: 1,
 };

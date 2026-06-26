@@ -12,15 +12,24 @@ def _merge_dicts(a: dict, b: dict) -> dict:
 class CampaignState(TypedDict, total=False):
     # --- inputs (set at START) ---
     image_path: str
-    image_mode: str         # "use_original" | "enhance_with_ai"
+    image_mode: str         # "use_original" | "enhance_with_ai" | "generate_with_ai"
+    # Owner-typed description of the product/business/service. Required (and used
+    # by the vision-less nodes) when the photo is skipped; empty otherwise.
+    product_description: str
     marketing_type: str     # "product" | "business" | "service"
     language: str           # "en" | "ar"
     budget: float
     goal: str
 
-    # --- question_generator_node output (Edit 2) ---
-    questions: list[str]       # 4 product-specific questions
-    user_answers: dict          # {"0": answer, "1": answer, "2": answer, "3": answer}
+    # --- campaign-target question (the one fixed question, asked first) ---
+    campaign_target_options: list   # ranked [{label, description, goal, recommended}]
+
+    # --- question_generator_node output ---
+    # Dynamic count: basic questions first, follow-ups only when valuable,
+    # bounded by MIN_QUESTIONS/MAX_QUESTIONS.
+    questions: list[str]       # adaptive follow-up questions (variable length)
+    user_answers: dict          # {"0": answer, "1": answer, ...} (adaptive answers)
+    questions_done: bool        # set by question_gen_node to end the interview
 
     # --- orchestrator output ---
     campaign_plan: dict

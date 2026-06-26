@@ -4,11 +4,12 @@ import { motion } from "framer-motion";
 import type { ChatPhase } from "@/hooks/useCampaignChat";
 
 const STEPS = [
-  { key: "setup", label: "Setup", emoji: "⚙️" },
-  { key: "questions", label: "Q&A", emoji: "💬" },
-  { key: "visual", label: "Visual", emoji: "🎨" },
-  { key: "copy", label: "Copy", emoji: "✍️" },
-  { key: "publish", label: "Publish", emoji: "🚀" },
+  { key: "setup", label: "Set up", emoji: "👋" },
+  { key: "goal", label: "Your goal", emoji: "🎯" },
+  { key: "questions", label: "Quick chat", emoji: "💬" },
+  { key: "picture", label: "Picture", emoji: "🖼️" },
+  { key: "words", label: "Words", emoji: "✍️" },
+  { key: "launch", label: "Launch", emoji: "🚀" },
 ];
 
 // Map the fine-grained phase to a coarse rail index.
@@ -18,24 +19,26 @@ function phaseToIndex(phase: ChatPhase): number {
     case "marketing_type":
     case "image":
     case "image_mode":
+    case "describe":
     case "budget":
-    case "goal":
     case "starting":
       return 0;
+    case "campaign_target":
+      return 1;
     case "questions":
     case "building":
-      return 1;
+      return 2;
     case "image_review":
     case "image_regenerating":
     case "max_regen":
-      return 2;
+      return 3;
     case "text_review":
     case "text_editing":
-      return 3;
+      return 4;
     case "done":
     case "publishing":
     case "published":
-      return 4;
+      return 5;
     default:
       return 0;
   }
@@ -56,7 +59,7 @@ export default function StageRail({ phase }: { phase: ChatPhase }) {
                 animate={{
                   scale: active ? 1.1 : 1,
                   boxShadow: active
-                    ? "0 0 0 1px rgba(124,92,255,0.5), 0 6px 24px -6px rgba(124,92,255,0.8)"
+                    ? "0 0 0 1px rgba(99,102,241,0.5), 0 6px 24px -6px rgba(99,102,241,0.8)"
                     : "0 0 0 0 transparent",
                 }}
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors ${

@@ -9,19 +9,30 @@ type Dict = Record<string, string>;
 
 const EN = {
   greeting:
-    "Hey, I'm **Mark** — your AI media buyer. ✨ I'll turn your photo into a ready-to-publish Meta ad campaign. Let's do this step by step.",
-  askLanguage: "First — which language should we work in?",
-  askMarketingType: "Great. What are you marketing today?",
-  askImage: "Perfect. Drop in a photo of it — this becomes the heart of your ad. 📸",
-  askImageMode: "Nice shot! Should I use it as-is, or enhance it with AI for a more polished, ad-ready look?",
-  askBudget: "How much do you want to invest in this campaign (total, in USD)? 💰",
-  askGoal:
-    "Last setup question — what's the goal? Tell me in your own words what you want this campaign to achieve.",
-  startingPipeline: "Love it. Give me a moment to study your product…",
+    "Hi! I'm **Mark**, your friendly ad helper. ✨ Tell me a little about what you're promoting and I'll build a ready-to-publish ad for you — one step at a time, no marketing experience needed.",
+  askLanguage: "First — which language feels most comfortable?",
+  askMarketingType: "Lovely. What would you like to promote?",
+  askImage:
+    "Got a photo of it? Drop it in below — or skip and I'll create one for you. 📸",
+  askImageMode: "Nice shot! Want me to use it as-is, or give it a polished, ad-ready makeover?",
+  askBudget: "How much would you like to spend in total? (in USD) 💰",
+  startingPipeline: "Love it. Give me a moment to take a look…",
+  // Campaign target — the one fixed question, AI-ranked choices
+  askTarget:
+    "Here's what I'd aim for based on what I can see. Which goal sounds right for you? I've starred my top pick. 👇",
+  targetIntro: "Now, what should this ad actually achieve?",
   questionsIntro:
-    "I studied your product and I have a few quick questions so the campaign fits perfectly. I'll ask them one at a time. 👇",
-  questionProgress: "Question {n} of {total}",
-  buildingCampaign: "Brilliant answers. Now I'm building your whole campaign…",
+    "Thanks! I've got a few quick questions so your ad fits perfectly. I'll ask one at a time — just answer in your own words. 👇",
+  questionProgress: "Question {n}",
+  buildingCampaign: "Great answers! Now I'm putting your whole ad together…",
+  generatingImage: "Creating a picture for your ad…",
+  aiCreatedImage: "AI-made visual",
+  skipImage: "No photo? Let AI create one ✨",
+  imageInvalid: "Please use a JPG, PNG, or WebP image.",
+  askDescribe:
+    "No problem — I'll make the picture for you. First, tell me about it in a sentence or two: what is it, and what makes it good? ✍️",
+  describePlaceholder:
+    "e.g. handmade scented soy candles, long-lasting, made from natural ingredients",
   imageReviewIntro: "Here's your ad visual. What do you think?",
   imageConfirmIntro: "Here's the photo we'll use for your ad. Looks good?",
   regenerating: "On it — reworking the visual with your notes…",
@@ -75,19 +86,29 @@ const EN = {
 
 const AR: Dict = {
   greeting:
-    "أهلاً، أنا **مارك** — الميديا باير بتاعك بالـ AI. ✨ هحوّل صورتك لحملة إعلانية جاهزة للنشر على ميتا. يلا نبدأ خطوة بخطوة.",
+    "أهلاً! أنا **مارك**، مساعدك للإعلانات. ✨ قوللي شوية عن اللي بتروّجله وأنا هجهزلك إعلان جاهز للنشر — خطوة بخطوة، ومن غير أي خبرة في التسويق.",
   askLanguage: "الأول — نشتغل بأنهي لغة؟",
-  askMarketingType: "تمام. بتسوّق إيه النهارده؟",
-  askImage: "حلو. ارفع صورة للمنتج — دي هتبقى قلب الإعلان. 📸",
+  askMarketingType: "تمام. عايز تروّج لإيه؟",
+  askImage: "عندك صورة ليه؟ ارفعها تحت — أو تخطّى وأنا أعملك واحدة. 📸",
   askImageMode:
-    "صورة جميلة! أستخدمها زي ما هي، ولا أحسّنها بالـ AI عشان تبقى أنسب للإعلانات؟",
-  askBudget: "عايز تستثمر كام في الحملة دي (الإجمالي بالدولار)؟ 💰",
-  askGoal: "آخر سؤال في الإعداد — إيه الهدف؟ قوللي بكلامك عايز الحملة تحقق إيه.",
-  startingPipeline: "تحفة. سيبني لحظة أدرس منتجك…",
+    "صورة جميلة! أستخدمها زي ما هي، ولا أعملها لمسة احترافية تخليها أنسب للإعلان؟",
+  askBudget: "عايز تصرف كام في الإجمالي؟ (بالدولار) 💰",
+  startingPipeline: "تحفة. سيبني لحظة أبص على اللي عندك…",
+  askTarget:
+    "ده اللي أنصحك بيه حسب اللي شايفه. أنهي هدف مناسب ليك؟ علّمت اختياري المفضّل بنجمة. 👇",
+  targetIntro: "طيب، الإعلان ده المفروض يحقق إيه؟",
   questionsIntro:
-    "درست منتجك وعندي كام سؤال سريع عشان الحملة تطلع مظبوطة. هسألك سؤال سؤال. 👇",
-  questionProgress: "سؤال {n} من {total}",
-  buildingCampaign: "إجابات رائعة. دلوقتي بببني حملتك كاملة…",
+    "تمام! عندي كام سؤال سريع عشان الإعلان يطلع مظبوط. هسألك سؤال سؤال — جاوب بكلامك. 👇",
+  questionProgress: "سؤال {n}",
+  buildingCampaign: "إجابات رائعة! دلوقتي بجمّع إعلانك كله…",
+  generatingImage: "بعمل صورة لإعلانك…",
+  aiCreatedImage: "صورة من الذكاء الاصطناعي",
+  skipImage: "مفيش صورة؟ خلّي الـ AI يعملها ✨",
+  imageInvalid: "من فضلك استخدم صورة JPG أو PNG أو WebP.",
+  askDescribe:
+    "ولا يهمك — هعملك الصورة بنفسي. الأول قوللي عنه في جملة أو اتنين: هو إيه، وإيه اللي بيميزه؟ ✍️",
+  describePlaceholder:
+    "مثال: شموع صويا معطّرة هاند ميد، بتفضل فترة طويلة، ومن مكونات طبيعية",
   imageReviewIntro: "دي صورة إعلانك. رأيك إيه؟",
   imageConfirmIntro: "دي الصورة اللي هنستخدمها في الإعلان. تمام؟",
   regenerating: "تمام — بعدّل الصورة حسب ملاحظاتك…",

@@ -116,10 +116,10 @@ function ImageArt() {
           style={{
             background:
               i === 0
-                ? "radial-gradient(circle, #7c5cff, transparent 70%)"
+                ? "radial-gradient(circle, #6366f1, transparent 70%)"
                 : i === 1
-                ? "radial-gradient(circle, #22d3ee, transparent 70%)"
-                : "radial-gradient(circle, #ff5cc8, transparent 70%)",
+                ? "radial-gradient(circle, #2dd4bf, transparent 70%)"
+                : "radial-gradient(circle, #fb7185, transparent 70%)",
           }}
           animate={{ rotate: [0, 360], borderRadius: ["40%", "55%", "40%"] }}
           transition={{ duration: 5 + i, repeat: Infinity, ease: "linear" }}

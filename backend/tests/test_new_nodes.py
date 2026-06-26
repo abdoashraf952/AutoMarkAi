@@ -11,13 +11,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ---------------------------------------------------------------------------
-# Test 6: adaptive question flow — gen produces one question, ask collects answer
+# Test 6: adaptive question flow — gen decides + produces one question,
+# ask collects answer, dynamic routing ends the interview
 # ---------------------------------------------------------------------------
 
 def test_question_gen_node_generates_single_question():
     """question_gen_node returns exactly one new question, parsed from JSON."""
-    with patch("nodes.question_generator.call_llm_vision",
-               return_value=json.dumps({"question": "Who is your ideal buyer?"})):
+    with patch("AutoMarkAi.backend.nodes.question_generator.analyze_visual",
+               return_value=json.dumps({"done": False, "question": "Who is your ideal buyer?"})):
         from AutoMarkAi.backend.nodes.question_generator import question_gen_node
         result = question_gen_node({
             "image_path": "tests/sample_input/watch.jpg",
@@ -27,17 +28,18 @@ def test_question_gen_node_generates_single_question():
         })
 
     assert result["questions"] == ["Who is your ideal buyer?"]
+    assert result["questions_done"] is False
 
 
 def test_question_gen_node_uses_prior_qa_context():
     """The next question's prompt must include the previous question and answer."""
     captured = {}
 
-    def capture(image_path, prompt, system):
+    def capture(image_path, prompt, system, description=None):
         captured["prompt"] = prompt
-        return json.dumps({"question": "What's your busiest season?"})
+        return json.dumps({"done": False, "question": "What's your busiest season?"})
 
-    with patch("nodes.question_generator.call_llm_vision", side_effect=capture):
+    with patch("AutoMarkAi.backend.nodes.question_generator.analyze_visual", side_effect=capture):
         from AutoMarkAi.backend.nodes.question_generator import question_gen_node
         result = question_gen_node({
             "image_path": "tests/sample_input/watch.jpg",
@@ -51,8 +53,8 @@ def test_question_gen_node_uses_prior_qa_context():
 
 
 def test_question_gen_node_falls_back_on_failure():
-    """If the vision call fails, gen_node uses the index-aligned fallback question."""
-    with patch("nodes.question_generator.call_llm_vision",
+    """If the analyze call fails, gen_node uses the index-aligned fallback question."""
+    with patch("AutoMarkAi.backend.nodes.question_generator.analyze_visual",
                side_effect=RuntimeError("vision down")):
         from AutoMarkAi.backend.nodes.question_generator import question_gen_node
         result = question_gen_node({
@@ -66,19 +68,58 @@ def test_question_gen_node_falls_back_on_failure():
     assert isinstance(result["questions"][0], str) and result["questions"][0]
 
 
+def test_question_gen_node_respects_minimum_before_stopping():
+    """The model can't end the interview before MIN_QUESTIONS is reached."""
+    import AutoMarkAi.backend.nodes.question_generator as qg
+    # Model says done, but no adaptive answers yet → forced to keep asking.
+    with patch("AutoMarkAi.backend.nodes.question_generator.analyze_visual",
+               return_value=json.dumps({"done": True, "question": ""})):
+        result = qg.question_gen_node({
+            "image_path": "tests/sample_input/watch.jpg",
+            "goal": "drive sales",
+            "questions": [],
+            "user_answers": {},
+        })
+    assert result["questions_done"] is False
+    assert len(result["questions"]) == 1  # a fallback/real question was produced
+
+
+def test_question_gen_node_stops_at_maximum():
+    """Once the max adaptive count is reached, the interview ends without an LLM call."""
+    import AutoMarkAi.backend.nodes.question_generator as qg
+    answers = {str(i): "x" for i in range(qg._MAX_ADAPTIVE)}
+    result = qg.question_gen_node({
+        "image_path": "tests/sample_input/watch.jpg",
+        "goal": "drive sales",
+        "questions": [f"Q{i}" for i in range(qg._MAX_ADAPTIVE)],
+        "user_answers": answers,
+    })
+    assert result["questions_done"] is True
+
+
 def test_question_ask_node_stores_answer_and_routes():
-    """question_ask_node stores the answer; route_after_answer loops until NUM_QUESTIONS."""
+    """question_ask_node stores the answer; route_after_gen ends on questions_done."""
     import AutoMarkAi.backend.nodes.question_generator as qg
 
-    with patch("nodes.question_generator.interrupt", return_value={"answer": "A1"}):
+    with patch("AutoMarkAi.backend.nodes.question_generator.interrupt", return_value={"answer": "A1"}):
         result = qg.question_ask_node({"questions": ["Q1?"], "user_answers": {}})
 
     assert result["user_answers"] == {"0": "A1"}
-    # one answer < NUM_QUESTIONS → loop back to generate the next question
-    assert qg.route_after_answer({"user_answers": {"0": "A1"}}) == "question_gen_node"
-    # enough answers → move on to the orchestrator
-    full = {str(i): "x" for i in range(qg.NUM_QUESTIONS)}
-    assert qg.route_after_answer({"user_answers": full}) == "orchestrator_node"
+    # not done → loop back to ask the generated question
+    assert qg.route_after_gen({"questions_done": False}) == "question_ask_node"
+    # done → move on to the orchestrator
+    assert qg.route_after_gen({"questions_done": True}) == "orchestrator_node"
+
+
+def test_target_ask_node_stores_goal_from_choice():
+    """target_ask_node turns the chosen option into state['goal']."""
+    import AutoMarkAi.backend.nodes.question_generator as qg
+    with patch("AutoMarkAi.backend.nodes.question_generator.interrupt",
+               return_value={"answer": "get WhatsApp messages from buyers"}):
+        result = qg.target_ask_node({"campaign_target_options": [
+            {"label": "Messages", "goal": "get WhatsApp messages from buyers", "recommended": True},
+        ]})
+    assert result["goal"] == "get WhatsApp messages from buyers"
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +153,8 @@ def test_creative_node_image_generation_failure_is_graceful():
         "image_mode": "enhance_with_ai",
     }
 
-    with patch("nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "gemini")):
-        with patch("nodes.creative.generate_ad_images",
+    with patch("AutoMarkAi.backend.nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "gemini")):
+        with patch("AutoMarkAi.backend.nodes.creative.generate_ad_images",
                    side_effect=RuntimeError("Quota exceeded")):
             result = creative_node(state)
 
@@ -157,8 +198,8 @@ def test_creative_node_uses_feedback_in_prompt():
         captured.append(prompt)
         return json.dumps(mock_creative), "gemini"
 
-    with patch("nodes.creative.call_llm", side_effect=capture_call_llm):
-        with patch("nodes.creative.generate_ad_images", return_value=["b64"] * 3):
+    with patch("AutoMarkAi.backend.nodes.creative.call_llm", side_effect=capture_call_llm):
+        with patch("AutoMarkAi.backend.nodes.creative.generate_ad_images", return_value=["b64"] * 3):
             creative_node(state)
 
     assert captured, "call_llm was never called"
@@ -178,7 +219,7 @@ def test_text_review_selects_copy_and_headline():
     importlib.reload(AutoMarkAi.backend.nodes.review)
     from AutoMarkAi.backend.nodes.review import text_review_node
 
-    with patch("nodes.review.interrupt",
+    with patch("AutoMarkAi.backend.nodes.review.interrupt",
                return_value={"copy_index": 1, "headline_index": 2,
                              "copy_text": "", "headline_text": ""}):
         result = text_review_node({
@@ -209,7 +250,7 @@ def test_text_review_applies_manual_edits():
     importlib.reload(AutoMarkAi.backend.nodes.review)
     from AutoMarkAi.backend.nodes.review import text_review_node
 
-    with patch("nodes.review.interrupt",
+    with patch("AutoMarkAi.backend.nodes.review.interrupt",
                return_value={"copy_index": 0, "headline_index": 0,
                              "copy_text": "Edited copy!", "headline_text": "Edited headline!"}):
         result = text_review_node({
@@ -243,9 +284,9 @@ def test_image_review_rejection_routes_to_regen_without_generating():
     importlib.reload(AutoMarkAi.backend.nodes.review)
     from AutoMarkAi.backend.nodes.review import image_review_node
 
-    with patch("nodes.review.enhance_ad_image") as mock_enh, \
-         patch("nodes.review.generate_ad_images") as mock_gen, \
-         patch("nodes.review.interrupt",
+    with patch("AutoMarkAi.backend.nodes.review.enhance_ad_image") as mock_enh, \
+         patch("AutoMarkAi.backend.nodes.review.generate_ad_images") as mock_gen, \
+         patch("AutoMarkAi.backend.nodes.review.interrupt",
                return_value={"approved": [False], "feedback": {"0": "make it darker"}}):
         result = image_review_node({
             "image_mode": "enhance_with_ai",
@@ -273,7 +314,7 @@ def test_image_regen_node_generates_once_and_records_history():
     importlib.reload(AutoMarkAi.backend.nodes.review)
     from AutoMarkAi.backend.nodes.review import image_regen_node
 
-    with patch("nodes.review.enhance_ad_image",
+    with patch("AutoMarkAi.backend.nodes.review.enhance_ad_image",
                return_value=["regenerated_b64"]) as mock_enh:
         result = image_regen_node({
             "image_path": "tests/sample_input/watch.jpg",
@@ -304,9 +345,9 @@ def test_image_review_at_limit_routes_to_pick_without_generating():
     importlib.reload(AutoMarkAi.backend.nodes.review)
     from AutoMarkAi.backend.nodes.review import image_review_node
 
-    with patch("nodes.review.enhance_ad_image") as mock_enh, \
-         patch("nodes.review.generate_ad_images") as mock_gen, \
-         patch("nodes.review.interrupt",
+    with patch("AutoMarkAi.backend.nodes.review.enhance_ad_image") as mock_enh, \
+         patch("AutoMarkAi.backend.nodes.review.generate_ad_images") as mock_gen, \
+         patch("AutoMarkAi.backend.nodes.review.interrupt",
                return_value={"approved": [False], "feedback": {"0": "again"}}):
         result = image_review_node({
             "image_mode": "enhance_with_ai",

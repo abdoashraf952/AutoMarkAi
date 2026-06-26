@@ -5,7 +5,20 @@ import { motion } from "framer-motion";
 
 const ACCEPT = ["image/jpeg", "image/png", "image/webp"];
 
-export default function ImageUpload({ onSelect }: { onSelect: (file: File) => void }) {
+export default function ImageUpload({
+  onSelect,
+  onSkip,
+  skipLabel = "No photo? Let AI create one ✨",
+  invalidMsg = "Please use a JPG, PNG, or WebP image.",
+  rtl,
+}: {
+  onSelect: (file: File) => void;
+  /** Skip the upload and let AI generate the image instead (optional step). */
+  onSkip?: () => void;
+  skipLabel?: string;
+  invalidMsg?: string;
+  rtl?: boolean;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -13,7 +26,7 @@ export default function ImageUpload({ onSelect }: { onSelect: (file: File) => vo
   function handle(file?: File | null) {
     if (!file) return;
     if (!ACCEPT.includes(file.type)) {
-      setErr("Please use a JPG, PNG, or WebP image.");
+      setErr(invalidMsg);
       return;
     }
     setErr(null);
@@ -21,7 +34,7 @@ export default function ImageUpload({ onSelect }: { onSelect: (file: File) => vo
   }
 
   return (
-    <div className="w-full">
+    <div className={`w-full ${rtl ? "rtl" : ""}`}>
       <motion.button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -57,6 +70,20 @@ export default function ImageUpload({ onSelect }: { onSelect: (file: File) => vo
       </motion.button>
 
       {err && <p className="mt-2 text-center text-xs text-red-300">{err}</p>}
+
+      {onSkip && (
+        <div className="mt-3 flex items-center justify-center">
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onSkip}
+            className="btn-ghost !py-2 text-xs"
+          >
+            {skipLabel}
+          </motion.button>
+        </div>
+      )}
 
       <input
         ref={inputRef}

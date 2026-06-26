@@ -15,7 +15,9 @@ from AutoMarkAi.backend.nodes.orchestrator import orchestrator_node
 from AutoMarkAi.backend.nodes.question_generator import (
     question_ask_node,
     question_gen_node,
-    route_after_answer,
+    route_after_gen,
+    target_ask_node,
+    target_gen_node,
 )
 from AutoMarkAi.backend.nodes.review import (
     image_pick_node,
@@ -67,9 +69,11 @@ def get_pipeline_graph():
 
     Topology:
         START
-          -> question_gen_node         [generate next question, Gemini vision]
-          -> question_ask_node         [interrupt: questions]  --loop--> question_gen_node
-          -> orchestrator_node
+          -> target_gen_node           [analyse product, rank campaign targets]
+          -> target_ask_node           [interrupt: campaign_target]  --sets goal-->
+          -> question_gen_node         [decide+generate next adaptive question]
+               --(ask)--> question_ask_node [interrupt: questions] --loop--> question_gen_node
+               --(done)--> orchestrator_node
           -> strategy_node             [persona + channels + dayparting]
           -> fan-out (Send):
                creative_node           [LLM text + Gemini images]
@@ -90,6 +94,8 @@ def get_pipeline_graph():
     """
     builder = StateGraph(CampaignState)
 
+    builder.add_node("target_gen_node", target_gen_node)
+    builder.add_node("target_ask_node", target_ask_node)
     builder.add_node("question_gen_node", question_gen_node)
     builder.add_node("question_ask_node", question_ask_node)
     builder.add_node("orchestrator_node", orchestrator_node)
@@ -102,14 +108,18 @@ def get_pipeline_graph():
     builder.add_node("text_review_node", text_review_node)
     builder.add_node("merge_node", merge_node)
 
-    # Adaptive interview: gen → ask → (loop) → orchestrator
-    builder.set_entry_point("question_gen_node")
-    builder.add_edge("question_gen_node", "question_ask_node")
+    # Fixed campaign-target question first, then the adaptive interview:
+    #   target_gen → target_ask → question_gen ─(ask)→ question_ask ─(loop)→ question_gen
+    #                                          └─(done)──────────────────→ orchestrator
+    builder.set_entry_point("target_gen_node")
+    builder.add_edge("target_gen_node", "target_ask_node")
+    builder.add_edge("target_ask_node", "question_gen_node")
     builder.add_conditional_edges(
-        "question_ask_node",
-        route_after_answer,
-        ["question_gen_node", "orchestrator_node"],
+        "question_gen_node",
+        route_after_gen,
+        ["question_ask_node", "orchestrator_node"],
     )
+    builder.add_edge("question_ask_node", "question_gen_node")
 
     # orchestrator -> strategy_node -> fan-out (so creative/media can use the persona)
     builder.add_conditional_edges(

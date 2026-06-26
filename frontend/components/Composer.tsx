@@ -9,6 +9,7 @@ import ImageUpload from "./steps/ImageUpload";
 import BudgetInput from "./steps/BudgetInput";
 import TextSend from "./steps/TextSend";
 import ReviewActions from "./steps/ReviewActions";
+import CampaignTargetCards from "./steps/CampaignTargetCards";
 
 /**
  * The docked, context-aware input area. It renders exactly the control the
@@ -76,7 +77,15 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
       );
 
     case "image":
-      return <ImageUpload onSelect={chat.setImage} />;
+      return (
+        <ImageUpload
+          onSelect={chat.setImage}
+          onSkip={chat.skipImage}
+          skipLabel={tr("skipImage")}
+          invalidMsg={tr("imageInvalid")}
+          rtl={rtl}
+        />
+      );
 
     case "image_mode":
       return (
@@ -100,16 +109,25 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
         />
       );
 
+    case "describe":
+      return (
+        <TextSend
+          placeholder={tr("describePlaceholder")}
+          sendLabel={tr("send")}
+          onSend={chat.setDescription}
+          rtl={rtl}
+        />
+      );
+
     case "budget":
       return <BudgetInput onSubmit={chat.setBudget} />;
 
-    case "goal":
+    case "campaign_target":
       return (
-        <TextSend
-          placeholder={tr("goalPlaceholder")}
-          sendLabel={tr("send")}
-          onSend={chat.setGoal}
-          rtl={rtl}
+        <CampaignTargetCards
+          options={chat.targetOptions}
+          onPick={chat.chooseTarget}
+          lang={lang}
         />
       );
 

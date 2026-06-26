@@ -13,6 +13,7 @@ import type {
   MarketingType,
   PublishResult,
   StageResponse,
+  TargetOption,
 } from "@/lib/types";
 
 // ------------------------------------------------------------------ //
@@ -23,9 +24,10 @@ export type ChatPhase =
   | "marketing_type"
   | "image"
   | "image_mode"
+  | "describe"
   | "budget"
-  | "goal"
   | "starting"
+  | "campaign_target"
   | "questions"
   | "building"
   | "image_review"
@@ -94,13 +96,15 @@ export function useCampaignChat() {
     marketingType: MarketingType;
     imageMode: ImageMode;
     budget: number;
-    goal: string;
     imageFile: File;
+    description: string;
   }>>({});
 
-  // questions (adaptive — one at a time, generated server-side)
+  // campaign-target (the one fixed question — AI-ranked options)
+  const [targetOptions, setTargetOptions] = useState<TargetOption[]>([]);
+
+  // questions (adaptive — one at a time, dynamic count, generated server-side)
   const [qIndex, setQIndex] = useState(0);
-  const [questionsTotal, setQuestionsTotal] = useState(0);
 
   // image review meta
   const [canRegenerate, setCanRegenerate] = useState(true);
@@ -185,11 +189,16 @@ export function useCampaignChat() {
               : tr("regensNoneLeft")
           );
         }
+        const generated = setupRef.current.imageMode === "generate_with_ai";
         pushMsg({
           role: "bot",
           kind: "image-card",
           imageSrc: src,
-          imageCaption: can ? tr("enhancedImage") : tr("yourPhoto"),
+          imageCaption: generated
+            ? tr("aiCreatedImage")
+            : can
+            ? tr("enhancedImage")
+            : tr("yourPhoto"),
         });
         setPhase("image_review");
         return;
@@ -284,6 +293,27 @@ export function useCampaignChat() {
     [botText, pushMsg, tr]
   );
 
+  // Skip the (optional) photo upload — AI will generate the visual instead.
+  // Since there's no image, we first ask the owner to describe what they're
+  // promoting so the target, questions, and plan are grounded in real info.
+  const skipImage = useCallback(() => {
+    setupRef.current.imageFile = undefined;
+    setupRef.current.imageMode = "generate_with_ai";
+    userText(tr("skipImage"));
+    botText(tr("askDescribe"));
+    setPhase("describe");
+  }, [botText, tr, userText]);
+
+  const setDescription = useCallback(
+    (text: string) => {
+      setupRef.current.description = text;
+      userText(text);
+      botText(tr("askBudget"));
+      setPhase("budget");
+    },
+    [botText, tr, userText]
+  );
+
   const chooseImageMode = useCallback(
     (mode: ImageMode) => {
       setupRef.current.imageMode = mode;
@@ -294,21 +324,13 @@ export function useCampaignChat() {
     [botText, tr, userText]
   );
 
-  const setBudget = useCallback(
-    (n: number) => {
-      setupRef.current.budget = n;
-      userText(`$${n.toLocaleString()}`);
-      botText(tr("askGoal"));
-      setPhase("goal");
-    },
-    [botText, tr, userText]
-  );
-
+  // After the budget we kick off the pipeline; the first interrupt is the
+  // AI-ranked campaign-target question (the one fixed question).
   const beginPipeline = useCallback(async () => {
     const s = setupRef.current;
-    if (!s.imageFile || !s.goal || !s.budget || !s.marketingType || !s.imageMode) return;
+    if (!s.budget || !s.marketingType || !s.imageMode) return;
     setPhase("starting");
-    startLoading("analyze", "Studying your product…");
+    startLoading("analyze", "Taking a look…");
     try {
       const session = await api.createSession();
       sessionRef.current = session.session_id;
@@ -321,66 +343,97 @@ export function useCampaignChat() {
       });
 
       const resp = await api.startSession(session.session_id, {
-        goal: s.goal,
         budget: s.budget,
         imageMode: s.imageMode,
         marketingType: s.marketingType,
         language: lang,
         imageFile: s.imageFile,
+        description: s.description,
       });
 
-      // First interrupt is the first adaptive question.
-      const total = resp.data.total ?? 0;
-      const idx = resp.data.index ?? 0;
-      setQuestionsTotal(total);
-      setQIndex(idx);
+      // First interrupt: the ranked campaign-target options.
       stopLoading();
-      botText(tr("questionsIntro"));
-      botText(`**${tr("questionProgress", { n: idx + 1, total })}**\n\n${resp.data.question ?? ""}`);
-      setPhase("questions");
+      setTargetOptions(resp.data.options ?? []);
+      botText(tr("askTarget"));
+      setPhase("campaign_target");
     } catch (e) {
       fail(e);
     }
   }, [botText, fail, lang, startLoading, stopLoading, tr]);
 
-  const setGoal = useCallback(
-    (text: string) => {
-      setupRef.current.goal = text;
-      userText(text);
+  const setBudget = useCallback(
+    (n: number) => {
+      setupRef.current.budget = n;
+      userText(`$${n.toLocaleString()}`);
       void beginPipeline();
     },
     [beginPipeline, userText]
   );
 
   // ---------------------------------------------------------------- //
-  // Questions — one at a time                                         //
+  // Campaign target — the fixed question, then the adaptive interview //
+  // ---------------------------------------------------------------- //
+  const showFirstQuestionOrAdvance = useCallback(
+    async (resp: StageResponse) => {
+      if (resp.stage === "questions") {
+        const idx = resp.data.index ?? 0;
+        stopLoading();
+        setQIndex(idx);
+        botText(tr("questionsIntro"));
+        botText(`**${tr("questionProgress", { n: idx + 1 })}**\n\n${resp.data.question ?? ""}`);
+        setPhase("questions");
+      } else {
+        await handleStage(resp);
+      }
+    },
+    [botText, handleStage, stopLoading, tr]
+  );
+
+  const chooseTarget = useCallback(
+    async (goal: string, label: string) => {
+      userText(label);
+      setTargetOptions([]);
+      setPhase("building");
+      startLoading("analyze", tr("thinkingNextQ"));
+      try {
+        const resp = await api.submitAnswer(sessionRef.current!, goal);
+        await showFirstQuestionOrAdvance(resp);
+      } catch (e) {
+        fail(e);
+      }
+    },
+    [fail, showFirstQuestionOrAdvance, startLoading, tr, userText]
+  );
+
+  // ---------------------------------------------------------------- //
+  // Questions — one at a time, dynamic count                          //
   // ---------------------------------------------------------------- //
   const answerQuestion = useCallback(
     async (text: string) => {
       userText(text);
-      const isLast = qIndex + 1 >= questionsTotal;
       setPhase("building");
-      startLoading(isLast ? "build" : "analyze", isLast ? "Building your campaign…" : tr("thinkingNextQ"));
+      // We don't know if this is the last question (dynamic), so use a neutral
+      // caption; if the interview ends, the build/image loader takes over.
+      startLoading("analyze", tr("thinkingNextQ"));
       try {
         const resp = await api.submitAnswer(sessionRef.current!, text);
         if (resp.stage === "questions") {
           // Backend generated the next adaptive question.
           const idx = resp.data.index ?? qIndex + 1;
-          const total = resp.data.total ?? questionsTotal;
           stopLoading();
           setQIndex(idx);
-          setQuestionsTotal(total);
-          botText(`**${tr("questionProgress", { n: idx + 1, total })}**\n\n${resp.data.question ?? ""}`);
+          botText(`**${tr("questionProgress", { n: idx + 1 })}**\n\n${resp.data.question ?? ""}`);
           setPhase("questions");
         } else {
           // Interview complete → pipeline moved on (image review, etc.)
+          setLoading((l) => ({ ...l, kind: "build", caption: tr("buildingCampaign") }));
           await handleStage(resp);
         }
       } catch (e) {
         fail(e);
       }
     },
-    [botText, fail, handleStage, qIndex, questionsTotal, startLoading, stopLoading, tr, userText]
+    [botText, fail, handleStage, qIndex, startLoading, stopLoading, tr, userText]
   );
 
   // ---------------------------------------------------------------- //
@@ -505,7 +558,7 @@ export function useCampaignChat() {
     idRef.current = 0;
     setMessages([]);
     setQIndex(0);
-    setQuestionsTotal(0);
+    setTargetOptions([]);
     setCanRegenerate(true);
     setImageMeta({ regenCount: 0, maxRegens: 2 });
     setError(null);
@@ -527,12 +580,15 @@ export function useCampaignChat() {
     chooseLanguage,
     chooseMarketingType,
     setImage,
+    skipImage,
+    setDescription,
     chooseImageMode,
     setBudget,
-    setGoal,
+    // campaign target
+    targetOptions,
+    chooseTarget,
     // questions
     qIndex,
-    questionsTotal,
     answerQuestion,
     // image review
     canRegenerate,

@@ -46,18 +46,22 @@ export async function createSession(): Promise<SessionResponse> {
   return parse<SessionResponse>(res);
 }
 
-/** Uploads the image and starts the pipeline — blocks until the first interrupt. */
+/** Starts the pipeline (image optional) — blocks until the first interrupt
+ *  (stage "campaign_target"). The campaign goal is chosen later from the
+ *  AI-ranked options, not sent here. */
 export async function startSession(
   sessionId: string,
   setup: SetupData
 ): Promise<StageResponse> {
   const form = new FormData();
-  form.append("goal", setup.goal);
   form.append("budget", String(setup.budget));
   form.append("image_mode", setup.imageMode);
   form.append("marketing_type", setup.marketingType);
   form.append("language", setup.language);
-  form.append("image", setup.imageFile, setup.imageFile.name);
+  form.append("description", setup.description ?? "");
+  if (setup.imageFile) {
+    form.append("image", setup.imageFile, setup.imageFile.name);
+  }
 
   const res = await fetch(`${API_BASE}/session/${sessionId}/start`, {
     method: "POST",

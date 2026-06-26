@@ -33,13 +33,14 @@ export default function BudgetInput({ onSubmit }: { onSubmit: (n: number) => voi
             type="number"
             min={1}
             step={50}
+            inputMode="decimal"
             value={value}
-            placeholder="Custom amount"
+            placeholder="Or type any amount"
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && valid) onSubmit(num);
             }}
-            className="field pl-8"
+            className="field no-spinner pl-8"
           />
         </div>
         <button

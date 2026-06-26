@@ -9,20 +9,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Deep space canvas
+        // Warm, friendly deep-navy canvas (approachable, not harsh)
         ink: {
-          950: "#05060f",
-          900: "#0a0c1b",
-          800: "#11142b",
-          700: "#1a1e3a",
+          950: "#070b1a",
+          900: "#0d1428",
+          800: "#16203c",
+          700: "#212d4d",
         },
-        // Neon accent system
+        // Friendly, confidence-building accent system:
+        // indigo (trust) → teal (go/grow), with warm amber for highlights.
         accent: {
-          DEFAULT: "#7c5cff",
-          violet: "#7c5cff",
-          cyan: "#22d3ee",
-          pink: "#ff5cc8",
-          lime: "#a3e635",
+          DEFAULT: "#6366f1",
+          violet: "#6366f1", // indigo — primary
+          cyan: "#2dd4bf",   // teal — secondary
+          pink: "#fb7185",   // soft coral
+          lime: "#34d399",   // emerald — "online" / success
+          amber: "#fbbf24",  // warm highlight — recommended
         },
         glass: {
           DEFAULT: "rgba(255,255,255,0.06)",
@@ -34,9 +36,10 @@ const config: Config = {
         sans: ["var(--font-geist)", "system-ui", "sans-serif"],
       },
       boxShadow: {
-        glow: "0 0 0 1px rgba(124,92,255,0.25), 0 8px 40px -8px rgba(124,92,255,0.45)",
-        "glow-cyan": "0 0 0 1px rgba(34,211,238,0.25), 0 8px 40px -8px rgba(34,211,238,0.45)",
-        card: "0 10px 50px -12px rgba(0,0,0,0.6)",
+        glow: "0 0 0 1px rgba(99,102,241,0.25), 0 8px 40px -8px rgba(99,102,241,0.45)",
+        "glow-cyan": "0 0 0 1px rgba(45,212,191,0.25), 0 8px 40px -8px rgba(45,212,191,0.45)",
+        "glow-amber": "0 0 0 1px rgba(251,191,36,0.35), 0 10px 40px -10px rgba(251,191,36,0.5)",
+        card: "0 10px 50px -12px rgba(0,0,0,0.55)",
       },
       backdropBlur: {
         xl: "24px",
