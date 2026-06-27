@@ -1,0 +1,60 @@
+# AutoMark AI — Unified Requirements
+# Covers CRM (FastAPI/asyncpg) + Data Analytics Assistant (Streamlit/SQLAlchemy)
+# Python 3.12 | Install: pip install -r requirements.txt
+
+# ── Web framework (CRM) ──────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# ── UI framework (Analytics) ─────────────────────────────────────────────────
+streamlit==1.45.1
+
+# ── Data validation ───────────────────────────────────────────────────────────
+pydantic==2.11.5
+pydantic[email]>=2.6.0
+pydantic-settings==2.9.1
+
+# ── Gemini / Google AI ────────────────────────────────────────────────────────
+google-generativeai==0.8.3
+google-genai>=1.10.0
+langchain-google-genai==2.0.7
+
+# ── LangGraph / LangChain / LangSmith ────────────────────────────────────────
+langgraph==0.3.34
+langchain-core==0.3.63
+langchain-community>=0.3.0
+langchain-text-splitters>=0.3.0
+langsmith==0.2.10
+
+# ── Database — async driver + pgvector (CRM) ─────────────────────────────────
+asyncpg==0.30.0
+pgvector==0.3.6
+
+# ── Database — sync ORM (Analytics) ──────────────────────────────────────────
+sqlalchemy==2.0.41
+psycopg2-binary==2.9.10
+
+# ── Data processing (Analytics) ───────────────────────────────────────────────
+pandas==2.2.3
+numpy==2.2.6
+scipy==1.15.3
+openpyxl==3.1.5
+plotly==6.1.2
+
+# ── HTTP / async utilities ────────────────────────────────────────────────────
+httpx==0.28.1
+tenacity==9.0.0
+aiofiles==24.1.0
+python-dotenv==1.1.0
+python-multipart==0.0.20
+
+# ── Document parsing (CRM RAG) ────────────────────────────────────────────────
+pypdf==5.1.0
+python-docx==1.1.2
+pillow==11.0.0
+
+# ── Semantic reranking (CRM RAG) ──────────────────────────────────────────────
+sentence-transformers==3.3.1
+
+# ── Structured logging (CRM) ──────────────────────────────────────────────────
+structlog==24.4.0
