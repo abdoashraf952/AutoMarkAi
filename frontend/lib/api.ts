@@ -4,8 +4,9 @@
 // ------------------------------------------------------------------ //
 
 import type {
-  ImageDecisionBody,
+  AssetType,
   ImagesResponse,
+  PhotoSelectBody,
   PublishBody,
   PublishResponse,
   ResultResponse,
@@ -46,21 +47,34 @@ export async function createSession(): Promise<SessionResponse> {
   return parse<SessionResponse>(res);
 }
 
-/** Starts the pipeline (image optional) — blocks until the first interrupt
- *  (stage "campaign_target"). The campaign goal is chosen later from the
- *  AI-ranked options, not sent here. */
+/** Upload a client asset (logo, brochure, floor plans, …) before starting. */
+export async function uploadAsset(
+  sessionId: string,
+  assetType: AssetType,
+  file: File
+): Promise<{ ok: boolean; asset_type: string; filename: string }> {
+  const form = new FormData();
+  form.append("asset_type", assetType);
+  form.append("file", file, file.name);
+  const res = await fetch(`${API_BASE}/session/${sessionId}/upload-asset`, {
+    method: "POST",
+    body: form,
+  });
+  return parse(res);
+}
+
+/** Starts the pipeline with the uploaded unit photos — blocks until the first
+ *  interrupt (stage "campaign_target"). The campaign goal is chosen later from
+ *  the AI-ranked options, not sent here. */
 export async function startSession(
   sessionId: string,
   setup: SetupData
 ): Promise<StageResponse> {
   const form = new FormData();
   form.append("budget", String(setup.budget));
-  form.append("image_mode", setup.imageMode);
-  form.append("marketing_type", setup.marketingType);
   form.append("language", setup.language);
-  form.append("description", setup.description ?? "");
-  if (setup.imageFile) {
-    form.append("image", setup.imageFile, setup.imageFile.name);
+  for (const file of setup.imageFiles) {
+    form.append("images", file, file.name);
   }
 
   const res = await fetch(`${API_BASE}/session/${sessionId}/start`, {
@@ -84,26 +98,16 @@ export async function submitAnswer(
   return parse<StageResponse>(res);
 }
 
-export async function imageDecision(
+/** Choose which uploaded photos to use in the ad (photo_select interrupt). */
+export async function selectPhotos(
   sessionId: string,
-  body: ImageDecisionBody
+  selectedIndices: number[]
 ): Promise<StageResponse> {
-  const res = await fetch(`${API_BASE}/session/${sessionId}/image-decision`, {
+  const body: PhotoSelectBody = { selected_indices: selectedIndices };
+  const res = await fetch(`${API_BASE}/session/${sessionId}/select-photos`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  });
-  return parse<StageResponse>(res);
-}
-
-export async function pickImage(
-  sessionId: string,
-  chosenIndex: number
-): Promise<StageResponse> {
-  const res = await fetch(`${API_BASE}/session/${sessionId}/pick-image`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chosen_index: chosenIndex }),
   });
   return parse<StageResponse>(res);
 }

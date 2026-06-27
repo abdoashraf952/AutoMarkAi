@@ -21,8 +21,8 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         transition={{ delay: 0.1 }}
         className="max-w-2xl text-4xl font-bold leading-tight sm:text-5xl"
       >
-        Your own ad, <span className="accent-gradient-text">ready to go</span> — just
-        answer a few simple questions.
+        Your real estate ad, <span className="accent-gradient-text">ready to go</span> — just
+        upload photos and answer a few questions.
       </motion.h1>
 
       <motion.p
@@ -31,9 +31,9 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         transition={{ delay: 0.2 }}
         className="mt-5 max-w-xl text-base text-white/60"
       >
-        Meet <span className="font-semibold text-white">Mark</span>, your friendly ad helper.
-        Share a photo (or let AI make one), pick a budget, and Mark guides you the rest of the way —
-        in plain language, no marketing experience needed.
+        Meet <span className="font-semibold text-white">Mark</span>, your real estate campaign
+        assistant. Upload your unit photos, share your compound details, and Mark builds a
+        professional Meta ad campaign for you — in plain language, no marketing experience needed.
       </motion.p>
 
       <motion.div
@@ -42,7 +42,7 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         transition={{ delay: 0.3 }}
         className="mt-7 flex flex-wrap items-center justify-center gap-2"
       >
-        {["💬 Simple questions", "🖼️ Pictures made for you", "✍️ Words that sell", "🚀 Publish in one tap"].map((c) => (
+        {["🏗️ Built for real estate", "📸 Your actual unit photos", "✍️ Ad copy that converts", "🚀 Publish to Meta in one tap"].map((c) => (
           <span key={c} className="chip">
             {c}
           </span>
@@ -58,7 +58,7 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         onClick={onStart}
         className="btn-primary mt-9 px-8 py-4 text-base"
       >
-        Let's make my ad →
+        Create my real estate campaign →
       </motion.button>
 
       <motion.p

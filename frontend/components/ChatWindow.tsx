@@ -9,7 +9,6 @@ import TypingIndicator from "./TypingIndicator";
 export default function ChatWindow({ chat }: { chat: CampaignChat }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const showTyping = chat.loading.active;
-  const pickDisabled = chat.phase !== "max_regen";
   const textDisabled = chat.phase !== "text_review";
 
   useEffect(() => {
@@ -23,8 +22,8 @@ export default function ChatWindow({ chat }: { chat: CampaignChat }) {
           <MessageBubble
             key={m.id}
             message={m}
-            onPickImage={chat.pickImage}
-            pickDisabled={pickDisabled}
+            onPickImage={() => {}}
+            pickDisabled
             onConfirmText={chat.submitText}
             textDisabled={textDisabled}
             lang={chat.lang}

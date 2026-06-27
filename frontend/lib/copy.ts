@@ -1,52 +1,72 @@
 // ------------------------------------------------------------------ //
 // Conversational copy for the chatbot, bilingual (en / ar).           //
-// Keeps the assistant's voice consistent and easy to tune.            //
+// Real estate campaign assistant ("Mark").                            //
 // ------------------------------------------------------------------ //
 
-import type { Language, MarketingType } from "./types";
+import type { Language } from "./types";
 
 type Dict = Record<string, string>;
 
 const EN = {
   greeting:
-    "Hi! I'm **Mark**, your friendly ad helper. ✨ Tell me a little about what you're promoting and I'll build a ready-to-publish ad for you — one step at a time, no marketing experience needed.",
+    "Hi! I'm **Mark**, your real estate campaign assistant. ✨ Upload your unit photos, tell me about your compound, and I'll build a ready-to-publish Meta ad campaign for you — step by step, no marketing experience needed.",
   askLanguage: "First — which language feels most comfortable?",
-  askMarketingType: "Lovely. What would you like to promote?",
-  askImage:
-    "Got a photo of it? Drop it in below — or skip and I'll create one for you. 📸",
-  askImageMode: "Nice shot! Want me to use it as-is, or give it a polished, ad-ready makeover?",
+  // Photos
+  askUnitPhotos: "Upload photos of the units you want to advertise 📸",
+  photoRequired: "At least one unit photo is required.",
+  photosAdded: "Your unit photos",
+  imageInvalid: "Please use JPG, PNG, or WebP images.",
+  yourPhoto: "Your photo",
+  // File uploads
+  uploadsIntro:
+    "Great. Now let's add your marketing assets — I'll ask for them one at a time. The logo is required; the rest are optional.",
+  askLogo: "Upload your company logo",
+  logoWhy: "We'll place your logo on the ad creative so the brand stands out.",
+  askBrochure: "Upload a brochure PDF (optional)",
+  brochureWhy: "Helps me pull accurate project details and selling points.",
+  askFloorPlans: "Upload floor plans (optional)",
+  floorPlansWhy: "Useful for highlighting layouts buyers care about.",
+  askMasterPlan: "Upload a master plan image (optional)",
+  masterPlanWhy: "Shows the full compound layout and amenities.",
+  askPriceList: "Upload a price list (optional)",
+  priceListWhy: "Lets me reference accurate pricing in the ad copy.",
+  fileSkip: "Skip",
+  fileDoneBtn: "Done with uploads →",
+  fileAdded: "Uploaded ✓",
+  // Budget
   askBudget: "How much would you like to spend in total? (in USD) 💰",
-  startingPipeline: "Love it. Give me a moment to take a look…",
-  // Campaign target — the one fixed question, AI-ranked choices
+  budgetPlaceholder: "500",
+  // Campaign target
   askTarget:
-    "Here's what I'd aim for based on what I can see. Which goal sounds right for you? I've starred my top pick. 👇",
-  targetIntro: "Now, what should this ad actually achieve?",
+    "Here's what I'd aim for based on your units. Which goal sounds right? I've starred my top pick. 👇",
+  // Questions
   questionsIntro:
-    "Thanks! I've got a few quick questions so your ad fits perfectly. I'll ask one at a time — just answer in your own words. 👇",
-  questionProgress: "Question {n}",
-  buildingCampaign: "Great answers! Now I'm putting your whole ad together…",
-  generatingImage: "Creating a picture for your ad…",
-  aiCreatedImage: "AI-made visual",
-  skipImage: "No photo? Let AI create one ✨",
-  imageInvalid: "Please use a JPG, PNG, or WebP image.",
-  askDescribe:
-    "No problem — I'll make the picture for you. First, tell me about it in a sentence or two: what is it, and what makes it good? ✍️",
-  describePlaceholder:
-    "e.g. handmade scented soy candles, long-lasting, made from natural ingredients",
-  imageReviewIntro: "Here's your ad visual. What do you think?",
-  imageConfirmIntro: "Here's the photo we'll use for your ad. Looks good?",
-  regenerating: "On it — reworking the visual with your notes…",
-  regensLeft: "You can re-tweak this {n} more time(s) — after that I'll show you all the versions to pick from.",
-  regensNoneLeft:
-    "Heads up — this is your last version. If it's not the one, I'll show you all the versions to pick your favourite.",
-  seeAllVersions: "Show me all the versions",
-  gatheringVersions: "Gathering all your versions…",
-  maxRegenIntro:
-    "We've hit the re-enhancement limit. Here's every version we created — pick the one you like best:",
-  textReviewIntro: "Now the words. Here's the copy I wrote for your ad:",
-  editingCopy: "Got it — rewriting the copy with your direction…",
+    "Thanks! A few quick questions about your compound so the ad fits perfectly. I'll ask one at a time. 👇",
+  questionProgress: "Question {n} of {total}",
+  followUpProgress: "Quick follow-up",
+  thinkingNextQ: "Thinking of the next question…",
+  otherOption: "Other",
+  otherPlaceholder: "Type your answer…",
+  confirmMulti: "Confirm",
+  // Building
+  buildingCampaign: "Great answers! Now I'm putting your whole campaign together…",
+  // Photo select
+  photoSelectIntro: "Pick which photos to include in your ad 📸",
+  photoSelectHint: "Tap photos to select, then confirm ☝️",
+  confirmPhotos: "Use these photos",
+  // Text review
+  textReviewPickIntro:
+    "Pick the copy and headline you like best — and tweak the wording if you want. ✍️",
+  pickEditHint: "Pick & edit your copy above, then confirm ☝️",
+  confirmSelection: "Confirm & continue",
+  chooseCopy: "Choose your ad copy",
+  chooseHeadline: "Choose your headline",
+  ctaLabel: "Call to action",
+  editIfNeeded: "Edit if needed",
+  // Done / publish
   doneIntro:
     "🎉 Your campaign is ready! Here's the full package. Review it, then publish whenever you're ready.",
+  publishBtn: "Publish to Meta",
   publishing: "Sending your campaign to Meta…",
   publishedSim:
     "✅ Done! Your campaign was published **(demo mode)** — a paused sponsored ad and an organic post were created.",
@@ -54,74 +74,64 @@ const EN = {
     "✅ Published live to Meta! Your sponsored ad is created (paused) and your organic post is up.",
   startOver: "Want to create another campaign, or wrap up here?",
   endGoodbye: "Thanks for using **AutoMark AI**! 👋 Your campaign is all set. See you next time.",
-  // labels
   endBtn: "End & exit",
-  pickAbove: "Tap an image above to choose it ☝️",
-  yourPhoto: "Your photo",
-  enhancedImage: "AI-enhanced visual",
+  newCampaign: "New campaign",
+  // generic
   approve: "Approve",
-  regenerate: "Tweak it",
   send: "Send",
   submitAnswer: "Send answer",
-  approveCopy: "Approve copy",
-  requestChanges: "Request changes",
-  thinkingNextQ: "Thinking of the next question…",
-  textReviewPickIntro:
-    "Pick the copy and headline you like best — and tweak the wording if you want. ✍️",
-  chooseCopy: "Choose your ad copy",
-  chooseHeadline: "Choose your headline",
-  ctaLabel: "Call to action",
-  editIfNeeded: "Edit if needed",
-  confirmSelection: "Confirm & continue",
-  pickEditHint: "Pick & edit your copy above, then confirm ☝️",
-  publishBtn: "Publish to Meta",
-  newCampaign: "New campaign",
-  useOriginal: "Use my photo",
-  enhanceAI: "Enhance with AI",
-  feedbackPlaceholderImg: "What should change? e.g. brighter background, remove the text…",
-  feedbackPlaceholderText: "e.g. make the tone more urgent and shorten the copies",
-  budgetPlaceholder: "500",
-  goalPlaceholder: "e.g. get WhatsApp leads for my luxury watches",
 } satisfies Dict;
 
 const AR: Dict = {
   greeting:
-    "أهلاً! أنا **مارك**، مساعدك للإعلانات. ✨ قوللي شوية عن اللي بتروّجله وأنا هجهزلك إعلان جاهز للنشر — خطوة بخطوة، ومن غير أي خبرة في التسويق.",
+    "أهلاً! أنا **مارك**، مساعدك لحملات العقارات. ✨ ارفع صور الوحدات، قوللي عن الكمبوند، وأنا هجهزلك حملة إعلانية جاهزة للنشر على ميتا — خطوة بخطوة، ومن غير أي خبرة في التسويق.",
   askLanguage: "الأول — نشتغل بأنهي لغة؟",
-  askMarketingType: "تمام. عايز تروّج لإيه؟",
-  askImage: "عندك صورة ليه؟ ارفعها تحت — أو تخطّى وأنا أعملك واحدة. 📸",
-  askImageMode:
-    "صورة جميلة! أستخدمها زي ما هي، ولا أعملها لمسة احترافية تخليها أنسب للإعلان؟",
+  askUnitPhotos: "ارفع صور الوحدات اللي عايز تعلن عنها 📸",
+  photoRequired: "لازم صورة وحدة واحدة على الأقل.",
+  photosAdded: "صور الوحدات بتاعتك",
+  imageInvalid: "من فضلك استخدم صور JPG أو PNG أو WebP.",
+  yourPhoto: "صورتك",
+  uploadsIntro:
+    "تمام. دلوقتي نضيف ملفاتك التسويقية — هطلبهم واحد واحد. اللوجو مطلوب، والباقي اختياري.",
+  askLogo: "ارفع لوجو الشركة",
+  logoWhy: "هنحط اللوجو على الإعلان عشان البراند يبان.",
+  askBrochure: "ارفع بروشور PDF (اختياري)",
+  brochureWhy: "بيساعدني أطلع تفاصيل المشروع ونقاط البيع بدقة.",
+  askFloorPlans: "ارفع مخططات الوحدات (اختياري)",
+  floorPlansWhy: "مفيد لإبراز التصميمات اللي العميل بيهتم بيها.",
+  askMasterPlan: "ارفع صورة الماستر بلان (اختياري)",
+  masterPlanWhy: "بتوضح شكل الكمبوند كله والخدمات.",
+  askPriceList: "ارفع قائمة الأسعار (اختياري)",
+  priceListWhy: "بتخليني أذكر أسعار دقيقة في الإعلان.",
+  fileSkip: "تخطّى",
+  fileDoneBtn: "خلصت الرفع →",
+  fileAdded: "اترفع ✓",
   askBudget: "عايز تصرف كام في الإجمالي؟ (بالدولار) 💰",
-  startingPipeline: "تحفة. سيبني لحظة أبص على اللي عندك…",
+  budgetPlaceholder: "٥٠٠",
   askTarget:
-    "ده اللي أنصحك بيه حسب اللي شايفه. أنهي هدف مناسب ليك؟ علّمت اختياري المفضّل بنجمة. 👇",
-  targetIntro: "طيب، الإعلان ده المفروض يحقق إيه؟",
+    "ده اللي أنصحك بيه حسب وحداتك. أنهي هدف مناسب ليك؟ علّمت اختياري المفضّل بنجمة. 👇",
   questionsIntro:
-    "تمام! عندي كام سؤال سريع عشان الإعلان يطلع مظبوط. هسألك سؤال سؤال — جاوب بكلامك. 👇",
-  questionProgress: "سؤال {n}",
-  buildingCampaign: "إجابات رائعة! دلوقتي بجمّع إعلانك كله…",
-  generatingImage: "بعمل صورة لإعلانك…",
-  aiCreatedImage: "صورة من الذكاء الاصطناعي",
-  skipImage: "مفيش صورة؟ خلّي الـ AI يعملها ✨",
-  imageInvalid: "من فضلك استخدم صورة JPG أو PNG أو WebP.",
-  askDescribe:
-    "ولا يهمك — هعملك الصورة بنفسي. الأول قوللي عنه في جملة أو اتنين: هو إيه، وإيه اللي بيميزه؟ ✍️",
-  describePlaceholder:
-    "مثال: شموع صويا معطّرة هاند ميد، بتفضل فترة طويلة، ومن مكونات طبيعية",
-  imageReviewIntro: "دي صورة إعلانك. رأيك إيه؟",
-  imageConfirmIntro: "دي الصورة اللي هنستخدمها في الإعلان. تمام؟",
-  regenerating: "تمام — بعدّل الصورة حسب ملاحظاتك…",
-  regensLeft: "فاضلك {n} محاولات تعديل. بعد كده هتختار من كل النسخ اللي عملناها.",
-  regensNoneLeft:
-    "خد بالك — دي آخر نسخة. لو مش عاجباك، هوريك كل النسخ تختار منهم اللي يعجبك.",
-  seeAllVersions: "وريني كل النسخ",
-  gatheringVersions: "بجمعلك كل النسخ…",
-  maxRegenIntro:
-    "وصلنا للحد الأقصى للتعديل. دي كل النسخ اللي عملناها — اختار اللي عاجباك:",
-  textReviewIntro: "دلوقتي الكلام. دي النصوص اللي كتبتها لإعلانك:",
-  editingCopy: "تمام — بعيد كتابة النصوص حسب توجيهك…",
+    "تمام! كام سؤال سريع عن الكمبوند عشان الإعلان يطلع مظبوط. هسألك سؤال سؤال. 👇",
+  questionProgress: "سؤال {n} من {total}",
+  followUpProgress: "سؤال متابعة سريع",
+  thinkingNextQ: "بفكر في السؤال اللي بعده…",
+  otherOption: "غير كده",
+  otherPlaceholder: "اكتب إجابتك…",
+  confirmMulti: "تأكيد",
+  buildingCampaign: "إجابات رائعة! دلوقتي بجمّع حملتك كلها…",
+  photoSelectIntro: "اختار الصور اللي عايز تحطها في الإعلان 📸",
+  photoSelectHint: "دوس على الصور لاختيارها، وبعدين أكّد ☝️",
+  confirmPhotos: "استخدم الصور دي",
+  textReviewPickIntro:
+    "اختار النص والعنوان اللي عاجبينك — وعدّل الصياغة لو حابب. ✍️",
+  pickEditHint: "اختار وعدّل النص من فوق، وبعدين أكّد ☝️",
+  confirmSelection: "تأكيد ومتابعة",
+  chooseCopy: "اختار نص الإعلان",
+  chooseHeadline: "اختار العنوان",
+  ctaLabel: "زر الإجراء",
+  editIfNeeded: "عدّل لو محتاج",
   doneIntro: "🎉 حملتك جاهزة! ده الباكدج الكامل. راجعه، وبعدين انشر وقت ما تحب.",
+  publishBtn: "انشر على ميتا",
   publishing: "ببعت حملتك لميتا…",
   publishedSim:
     "✅ تمام! حملتك اتنشرت **(وضع تجريبي)** — اتعمل إعلان ممول (متوقف) وبوست عضوي.",
@@ -130,32 +140,10 @@ const AR: Dict = {
   startOver: "عايز تعمل حملة تانية، ولا نخلص هنا؟",
   endGoodbye: "شكراً لاستخدامك **AutoMark AI**! 👋 حملتك جاهزة. لحد ما نتقابل تاني.",
   endBtn: "إنهاء وخروج",
-  pickAbove: "اختار صورة من فوق ☝️",
-  yourPhoto: "صورتك",
-  enhancedImage: "صورة محسّنة بالـ AI",
+  newCampaign: "حملة جديدة",
   approve: "موافق",
-  regenerate: "عدّلها",
   send: "إرسال",
   submitAnswer: "إرسال الإجابة",
-  approveCopy: "موافق على النص",
-  requestChanges: "اطلب تعديلات",
-  thinkingNextQ: "بفكر في السؤال اللي بعده…",
-  textReviewPickIntro:
-    "اختار النص والعنوان اللي عاجبينك — وعدّل الصياغة لو حابب. ✍️",
-  chooseCopy: "اختار نص الإعلان",
-  chooseHeadline: "اختار العنوان",
-  ctaLabel: "زر الإجراء",
-  editIfNeeded: "عدّل لو محتاج",
-  confirmSelection: "تأكيد ومتابعة",
-  pickEditHint: "اختار وعدّل النص من فوق، وبعدين أكّد ☝️",
-  publishBtn: "انشر على ميتا",
-  newCampaign: "حملة جديدة",
-  useOriginal: "استخدم صورتي",
-  enhanceAI: "حسّن بالـ AI",
-  feedbackPlaceholderImg: "تغيّر إيه؟ مثلاً خلفية أفتح، شيل النص…",
-  feedbackPlaceholderText: "مثلاً خلي النبرة أكثر إلحاحاً واختصر النصوص",
-  budgetPlaceholder: "٥٠٠",
-  goalPlaceholder: "مثال: أجيب عملاء واتساب للساعات الفاخرة",
 };
 
 export type CopyKey = keyof typeof EN;
@@ -170,19 +158,3 @@ export function t(lang: Language, key: CopyKey, vars?: Record<string, string | n
   }
   return s;
 }
-
-export const MARKETING_TYPE_OPTIONS: Record<
-  Language,
-  { value: MarketingType; label: string; sub: string; emoji: string }[]
-> = {
-  en: [
-    { value: "product", label: "A Product", sub: "A physical or digital item you sell", emoji: "📦" },
-    { value: "business", label: "A Business", sub: "A shop, clinic, restaurant, or brand", emoji: "🏪" },
-    { value: "service", label: "A Service", sub: "Consulting, cleaning, tutoring, design…", emoji: "🛠️" },
-  ],
-  ar: [
-    { value: "product", label: "منتج", sub: "حاجة بتبيعها (هاردوير، ملابس، أكل، تطبيق)", emoji: "📦" },
-    { value: "business", label: "بيزنس", sub: "محل، عيادة، مطعم، أو براند", emoji: "🏪" },
-    { value: "service", label: "خدمة", sub: "استشارات، تنظيف، تدريس، تصميم…", emoji: "🛠️" },
-  ],
-};

@@ -40,6 +40,19 @@ def media_buying_node(state: dict) -> dict:
 
         raw, provider = call_llm(prompt, system, "media_buying", allow_fallback=True)
         media_output = _parse_json_with_retry(raw)
+
+        # HOUSING compliance — hard override of any LLM targeting that violates
+        # Meta's Special Ad Category rules for real estate (CHANGE 5).
+        audience = dict(media_output.get("audience") or {})
+        audience["age_min"] = 18
+        audience["age_max"] = 65
+        audience["genders"] = ["all"]
+        audience.pop("income_tier", None)  # not allowed for HOUSING
+        if not audience.get("locations"):
+            audience["locations"] = ["EG"]
+        media_output["audience"] = audience
+        media_output["special_ad_category"] = "HOUSING"
+
         logger.info("media_buying_node complete via %s (lang=%s)", provider, language)
         return {
             "media_output": media_output,

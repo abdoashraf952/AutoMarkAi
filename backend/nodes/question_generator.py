@@ -1,21 +1,20 @@
-"""Campaign-target + adaptive question interview.
+"""Campaign-target + real estate interview (CHANGE 3).
 
 Flow (all generation happens in non-interrupting nodes so it never replays on
-resume — same pattern as the review nodes):
+resume — same checkpoint-safe pattern as the review nodes):
 
-    target_gen_node    → analyse the product, produce RANKED campaign-target
+    target_gen_node    → analyse the units, produce RANKED campaign-target
                          options (one recommended). No interrupt.
     target_ask_node    → interrupt to let the user pick a target; stores the
-                         chosen goal as state["goal"]. (The campaign target is
-                         the one FIXED question, always asked first — Edit 2/5.)
-    question_gen_node  → decide whether one more adaptive question adds value and,
-                         if so, generate it. No interrupt. Routes "ask" / "done".
-    question_ask_node  → interrupt to collect that answer.
-    route_after_gen    → ask another question or move on to orchestrator.
+                         chosen goal as state["goal"].
+    question_gen_node  → decide what to ask next: the next FIXED interview
+                         question, an optional LLM follow-up, or done.
+    question_ask_node  → interrupt to collect that answer and store it.
+    route_after_gen    → ask another question or move on to the orchestrator.
 
-The number of adaptive questions is dynamic (Edit 5): the model asks basic
-questions first and only adds follow-ups when they help, bounded by
-MIN_QUESTIONS/MAX_QUESTIONS (which include the fixed campaign-target question).
+The interview alternates a curated FIXED_QUESTIONS list with at most one
+LLM-generated follow-up after each fixed question (the follow-up only fires when
+the user's answer was vague/incomplete or revealed something worth exploring).
 """
 
 import logging
@@ -25,24 +24,184 @@ from langgraph.types import interrupt
 
 from AutoMarkAi.backend.llm_client import (
     _parse_json_with_retry,
-    _strip_markdown_fences,
     analyze_visual,
+    call_llm,
 )
 from AutoMarkAi.backend.i18n import get_question_prompts, get_target_prompts
+from AutoMarkAi.backend.real_estate_utils import get_price_tier
 
 logger = logging.getLogger(__name__)
 
-# Allowed total-question range (the campaign-target question counts as one).
-MIN_QUESTIONS = int(os.getenv("MIN_QUESTIONS", "4"))
-MAX_QUESTIONS = int(os.getenv("MAX_QUESTIONS", "10"))
-
-# Adaptive follow-ups asked AFTER the fixed campaign-target question.
-_MIN_ADAPTIVE = max(0, MIN_QUESTIONS - 1)
-_MAX_ADAPTIVE = max(_MIN_ADAPTIVE, MAX_QUESTIONS - 1)
+# Follow-ups can be globally disabled for a faster, fully-scripted interview.
+ENABLE_FOLLOW_UPS = os.getenv("ENABLE_FOLLOW_UPS", "true").lower() == "true"
 
 
 # ------------------------------------------------------------------ #
-# Campaign target — the one fixed question (Edit 2)                   #
+# Curated fixed interview (CHANGE 3)                                  #
+# ------------------------------------------------------------------ #
+FIXED_QUESTIONS = [
+    {
+        "key": "compound_name",
+        "data_field": "compound_name",
+        "type": "free_text",
+        "question_en": "What's the name of the compound or project you're advertising?",
+        "question_ar": "إيه اسم الكمبوند أو المشروع اللي عايز تعلن عنه؟",
+        "options_en": None,
+        "options_ar": None,
+        "recommended": None,
+    },
+    {
+        "key": "location",
+        "data_field": "location",
+        "type": "single_select_with_other",
+        "question_en": "Where is it located?",
+        "question_ar": "فين موقعه؟",
+        "options_en": [
+            {"label": "New Cairo", "value": "new_cairo"},
+            {"label": "6th of October", "value": "6th_october"},
+            {"label": "Sheikh Zayed", "value": "sheikh_zayed"},
+            {"label": "North Coast", "value": "north_coast"},
+            {"label": "New Administrative Capital", "value": "new_capital"},
+            {"label": "Ain Sokhna", "value": "ain_sokhna"},
+            {"label": "Mostakbal City", "value": "mostakbal_city"},
+        ],
+        "options_ar": [
+            {"label": "القاهرة الجديدة", "value": "new_cairo"},
+            {"label": "٦ أكتوبر", "value": "6th_october"},
+            {"label": "الشيخ زايد", "value": "sheikh_zayed"},
+            {"label": "الساحل الشمالي", "value": "north_coast"},
+            {"label": "العاصمة الإدارية الجديدة", "value": "new_capital"},
+            {"label": "العين السخنة", "value": "ain_sokhna"},
+            {"label": "مدينة المستقبل", "value": "mostakbal_city"},
+        ],
+        "recommended": "new_cairo",
+    },
+    {
+        "key": "unit_types",
+        "data_field": "unit_types",
+        "type": "multi_select_with_other",
+        "question_en": "What types of units are available?",
+        "question_ar": "إيه أنواع الوحدات المتاحة؟",
+        "options_en": [
+            {"label": "Apartment", "value": "apartment"},
+            {"label": "Villa", "value": "villa"},
+            {"label": "Duplex", "value": "duplex"},
+            {"label": "Townhouse", "value": "townhouse"},
+            {"label": "Twin House", "value": "twin_house"},
+            {"label": "Penthouse", "value": "penthouse"},
+            {"label": "Studio", "value": "studio"},
+            {"label": "Chalet", "value": "chalet"},
+        ],
+        "options_ar": [
+            {"label": "شقة", "value": "apartment"},
+            {"label": "فيلا", "value": "villa"},
+            {"label": "دوبلكس", "value": "duplex"},
+            {"label": "تاون هاوس", "value": "townhouse"},
+            {"label": "توين هاوس", "value": "twin_house"},
+            {"label": "بنتهاوس", "value": "penthouse"},
+            {"label": "استوديو", "value": "studio"},
+            {"label": "شاليه", "value": "chalet"},
+        ],
+        "recommended": None,
+    },
+    {
+        "key": "starting_price",
+        "data_field": "starting_price",
+        "type": "free_text",
+        "question_en": "What's the starting price? (in EGP)",
+        "question_ar": "إيه أقل سعر؟ (بالجنيه المصري)",
+        "options_en": None,
+        "options_ar": None,
+        "recommended": None,
+    },
+    {
+        "key": "payment_plan",
+        "data_field": "payment_plan",
+        "type": "free_text",
+        "question_en": "What are the payment terms? (down payment %, installment years, delivery date)",
+        "question_ar": "إيه نظام السداد؟ (مقدم %، سنوات تقسيط، تاريخ الاستلام)",
+        "options_en": None,
+        "options_ar": None,
+        "recommended": None,
+    },
+    {
+        "key": "offer",
+        "data_field": "offer",
+        "type": "single_select_with_other",
+        "question_en": "Do you currently have a special offer running?",
+        "question_ar": "عندك عرض حالي؟",
+        "options_en": [
+            {"label": "5% Down Payment", "value": "5_percent_down"},
+            {"label": "Zero Down Payment", "value": "zero_down"},
+            {"label": "Limited Units Available", "value": "limited_units"},
+            {"label": "Free Club Membership", "value": "free_membership"},
+            {"label": "Discount on Cash", "value": "cash_discount"},
+            {"label": "Furnished Units", "value": "furnished"},
+            {"label": "No current offer", "value": "no_offer"},
+        ],
+        "options_ar": [
+            {"label": "مقدم ٥٪", "value": "5_percent_down"},
+            {"label": "بدون مقدم", "value": "zero_down"},
+            {"label": "وحدات محدودة", "value": "limited_units"},
+            {"label": "عضوية نادي مجانية", "value": "free_membership"},
+            {"label": "خصم على الكاش", "value": "cash_discount"},
+            {"label": "وحدات مفروشة", "value": "furnished"},
+            {"label": "مفيش عرض حالياً", "value": "no_offer"},
+        ],
+        "recommended": "limited_units",  # may be overridden by price tier
+    },
+    {
+        "key": "lead_destination",
+        "data_field": "lead_destination",
+        "type": "single_select_with_other",
+        "question_en": "Where should interested people reach you?",
+        "question_ar": "العميل المهتم يتواصل معاك إزاي؟",
+        "options_en": [
+            {"label": "WhatsApp", "value": "whatsapp"},
+            {"label": "Phone Call", "value": "phone"},
+            {"label": "Facebook Instant Form", "value": "instant_form"},
+            {"label": "Landing Page", "value": "landing_page"},
+        ],
+        "options_ar": [
+            {"label": "واتساب", "value": "whatsapp"},
+            {"label": "مكالمة تليفون", "value": "phone"},
+            {"label": "فورم فيسبوك", "value": "instant_form"},
+            {"label": "صفحة هبوط", "value": "landing_page"},
+        ],
+        "recommended": "whatsapp",
+    },
+    {
+        "key": "campaign_duration",
+        "data_field": "campaign_duration",
+        "type": "single_select_with_other",
+        "question_en": "How long should the campaign run?",
+        "question_ar": "الحملة تشتغل لمدة قد إيه؟",
+        "options_en": [
+            {"label": "1 week", "value": "7"},
+            {"label": "2 weeks", "value": "14"},
+            {"label": "1 month", "value": "30"},
+            {"label": "3 months", "value": "90"},
+        ],
+        "options_ar": [
+            {"label": "أسبوع", "value": "7"},
+            {"label": "أسبوعين", "value": "14"},
+            {"label": "شهر", "value": "30"},
+            {"label": "٣ شهور", "value": "90"},
+        ],
+        "recommended": "14",
+    },
+]
+
+TOTAL_FIXED = len(FIXED_QUESTIONS)
+
+
+def _first_image(state: dict) -> str | None:
+    paths = state.get("image_paths") or []
+    return paths[0] if paths else None
+
+
+# ------------------------------------------------------------------ #
+# Campaign target — the one fixed question (asked first)              #
 # ------------------------------------------------------------------ #
 def _normalize_options(parsed) -> list[dict]:
     """Coerce the model output into a clean list of target option dicts."""
@@ -62,29 +221,21 @@ def _normalize_options(parsed) -> list[dict]:
             "goal": str(opt.get("goal") or opt.get("description") or label).strip(),
             "recommended": bool(opt.get("recommended", False)),
         })
-    # Guarantee exactly one recommended option (default to the first / best).
     if clean and not any(o["recommended"] for o in clean):
         clean[0]["recommended"] = True
     return clean
 
 
 def target_gen_node(state: dict) -> dict:
-    """Produce ranked campaign-target options. No interrupt → never replayed.
-
-    State reads:  image_path, budget, language, marketing_type
-    State writes: campaign_target_options
-    """
+    """Produce ranked campaign-target options. No interrupt → never replayed."""
     language = state.get("language", "en")
-    marketing_type = state.get("marketing_type", "product")
+    marketing_type = state.get("marketing_type", "real_estate")
     system, user_template, fallback = get_target_prompts(language, marketing_type)
 
     options: list[dict] = []
     try:
         prompt = user_template.format(budget=state.get("budget", 0))
-        raw = analyze_visual(
-            state.get("image_path"), prompt, system,
-            description=state.get("product_description"),
-        )
+        raw = analyze_visual(_first_image(state), prompt, system)
         options = _normalize_options(_parse_json_with_retry(raw))
     except Exception as e:
         logger.warning("target_gen_node failed (%s) — using fallback options", e)
@@ -97,19 +248,9 @@ def target_gen_node(state: dict) -> dict:
 
 
 def target_ask_node(state: dict) -> dict:
-    """Interrupt so the user picks a campaign target; store it as the goal.
-
-    Interrupt payload: {"stage": "campaign_target", "options": [...]}
-    Resume payload:    {"answer": "<chosen goal sentence>"}  (or {"goal": ...})
-
-    State reads:  campaign_target_options
-    State writes: goal
-    """
+    """Interrupt so the user picks a campaign target; store it as the goal."""
     options = list(state.get("campaign_target_options") or [])
-    result = interrupt({
-        "stage": "campaign_target",
-        "options": options,
-    })
+    result = interrupt({"stage": "campaign_target", "options": options})
 
     if isinstance(result, dict):
         goal = result.get("goal") or result.get("answer") or ""
@@ -117,7 +258,6 @@ def target_ask_node(state: dict) -> dict:
         goal = str(result)
     goal = (goal or "").strip()
     if not goal and options:
-        # Fall back to the recommended option's goal.
         rec = next((o for o in options if o.get("recommended")), options[0])
         goal = rec.get("goal", "")
 
@@ -126,133 +266,199 @@ def target_ask_node(state: dict) -> dict:
 
 
 # ------------------------------------------------------------------ #
-# Adaptive follow-up questions — dynamic count (Edit 5)              #
+# Real estate interview — fixed questions + LLM follow-ups            #
 # ------------------------------------------------------------------ #
-def _build_qa_context(questions: list, answers: dict, language: str) -> str:
-    """Render the conversation so far so the next question can build on it."""
-    completed = len(answers)
-    if completed == 0:
-        return (
-            "(no follow-up questions have been asked yet)"
-            if language != "ar"
-            else "(لسه مفيش أسئلة follow-up اتسألت)"
-        )
-    header = "Conversation so far:" if language != "ar" else "المحادثة لحد دلوقتي:"
-    lines = [header]
-    for i in range(completed):
-        q = questions[i] if i < len(questions) else ""
-        a = answers.get(str(i), answers.get(i, ""))
-        lines.append(f"Q{i + 1}: {q}")
-        lines.append(f"A{i + 1}: {a}")
+def _localized(q: dict, language: str) -> tuple[str, list | None]:
+    """Return (question_text, options) for the active language."""
+    if language == "ar":
+        return q["question_ar"], q.get("options_ar")
+    return q["question_en"], q.get("options_en")
+
+
+def _build_fixed_payload(q: dict, idx: int, language: str, state: dict) -> dict:
+    """Build the interrupt payload for a fixed question at index `idx`."""
+    question_text, raw_options = _localized(q, language)
+
+    # Price-tier smart default may override the recommended offer (CHANGE 8).
+    recommended = q.get("recommended")
+    if q["key"] == "offer":
+        starting = (state.get("real_estate_data") or {}).get("starting_price")
+        if starting:
+            recommended = get_price_tier(starting).get("recommended_offer", recommended)
+
+    options = None
+    if raw_options:
+        options = [
+            {"label": o["label"], "value": o["value"], "recommended": o["value"] == recommended}
+            for o in raw_options
+        ]
+
+    return {
+        "stage": "questions",
+        "question": question_text,
+        "question_type": q["type"],
+        "options": options,
+        "allow_other": True,
+        "index": idx,
+        "total_fixed": TOTAL_FIXED,
+        "is_follow_up": False,
+        "data_field": q["data_field"],
+        "key": q["key"],
+    }
+
+
+def _build_follow_up_payload(question_text: str, idx: int) -> dict:
+    return {
+        "stage": "questions",
+        "question": question_text,
+        "question_type": "free_text",
+        "options": None,
+        "allow_other": True,
+        "index": idx,
+        "total_fixed": TOTAL_FIXED,
+        "is_follow_up": True,
+        "data_field": None,
+        "key": "follow_up",
+    }
+
+
+def _qa_context(state: dict) -> str:
+    """Render the interview so far for the follow-up decision LLM."""
+    data = state.get("real_estate_data") or {}
+    follow_ups = state.get("follow_up_log") or []
+    if not data and not follow_ups:
+        return "(no answers yet)"
+    lines = []
+    for k, v in data.items():
+        lines.append(f"- {k}: {v}")
+    for fu in follow_ups:
+        lines.append(f"- follow-up Q: {fu.get('q')} → {fu.get('a')}")
     return "\n".join(lines)
 
 
-def _parse_decision(raw: str, fallback: str) -> tuple[bool, str]:
-    """Extract (done, question) from the model output, robustly."""
+def _decide_follow_up(state: dict, topic: str, language: str) -> str:
+    """Ask the LLM whether one short follow-up adds value. Returns the question
+    text, or "" when no follow-up is warranted."""
+    if not ENABLE_FOLLOW_UPS:
+        return ""
+    system, user_template, _ = get_question_prompts(language, state.get("marketing_type", "real_estate"))
     try:
+        prompt = user_template.format(qa_context=_qa_context(state), topic=topic)
+        raw, _ = call_llm(prompt, system, "follow_up", allow_fallback=True)
         parsed = _parse_json_with_retry(raw)
-        if isinstance(parsed, dict):
-            done = bool(parsed.get("done", False))
-            q = parsed.get("question") or parsed.get("q") or ""
-            return done, str(q).strip()
-    except Exception:
-        pass
-    # No JSON — treat the first non-empty line as the question, not done.
-    for line in _strip_markdown_fences(raw).splitlines():
-        s = line.strip().strip('"').strip()
-        if s:
-            return False, s
-    return False, fallback
+        if isinstance(parsed, dict) and parsed.get("follow_up"):
+            q = str(parsed.get("question") or "").strip()
+            return q
+    except Exception as e:
+        logger.warning("_decide_follow_up failed (%s) — skipping follow-up", e)
+    return ""
 
 
 def question_gen_node(state: dict) -> dict:
-    """Decide whether to ask another adaptive question and, if so, generate it.
-
-    No interrupt → never replayed. Routing is via route_after_gen, which reads
-    the `questions_done` flag this node sets.
-
-    State reads:  image_path, goal, language, marketing_type, questions, user_answers
-    State writes: questions (appends one when asking), questions_done
-    """
+    """Decide the next question (fixed / follow-up / done). No interrupt."""
     language = state.get("language", "en")
-    marketing_type = state.get("marketing_type", "product")
-    system, user_template, fallback = get_question_prompts(language, marketing_type)
+    fixed_idx = state.get("current_fixed_q_index", 0)
 
-    questions = list(state.get("questions") or [])
-    answers = state.get("user_answers") or {}
-    answered = len(answers)  # adaptive answers collected so far
+    # First entry into the interview → present the first fixed question.
+    if not state.get("pending_answered"):
+        payload = _build_fixed_payload(FIXED_QUESTIONS[0], 0, language, state)
+        return {
+            "pending_question": payload,
+            "current_fixed_q_index": 0,
+            "is_follow_up": False,
+            "pending_answered": False,
+            "questions_done": False,
+        }
 
-    # Hard bounds — these win over the model's preference.
-    if answered >= _MAX_ADAPTIVE:
-        logger.info("question_gen_node: reached max adaptive questions (%d)", answered)
+    # An answer just came in.
+    if state.get("last_answer_was_follow_up"):
+        # We already inserted a follow-up for this topic → advance to next fixed.
+        next_idx = fixed_idx + 1
+    else:
+        # Just answered a fixed question → maybe insert one follow-up.
+        topic = FIXED_QUESTIONS[fixed_idx]["key"] if fixed_idx < TOTAL_FIXED else ""
+        follow_up_q = _decide_follow_up(state, topic, language)
+        if follow_up_q:
+            payload = _build_follow_up_payload(follow_up_q, fixed_idx)
+            logger.info("question_gen_node: inserting follow-up after '%s'", topic)
+            return {
+                "pending_question": payload,
+                "is_follow_up": True,
+                "pending_answered": False,
+                "questions_done": False,
+            }
+        next_idx = fixed_idx + 1
+
+    if next_idx >= TOTAL_FIXED:
+        logger.info("question_gen_node: interview complete (%d fixed questions)", TOTAL_FIXED)
         return {"questions_done": True}
 
-    fb = (fallback[answered] if answered < len(fallback) else fallback[-1]) if fallback else (
-        "Tell me more about what makes this special."
-    )
+    payload = _build_fixed_payload(FIXED_QUESTIONS[next_idx], next_idx, language, state)
+    logger.info("question_gen_node: presenting fixed question %d/%d", next_idx + 1, TOTAL_FIXED)
+    return {
+        "pending_question": payload,
+        "current_fixed_q_index": next_idx,
+        "is_follow_up": False,
+        "pending_answered": False,
+        "questions_done": False,
+    }
 
-    done = False
-    question = fb
-    try:
-        prompt = user_template.format(
-            goal=state.get("goal", ""),
-            qa_context=_build_qa_context(questions, answers, language),
-            answered=answered,
-            min_q=MIN_QUESTIONS,
-            max_q=MAX_QUESTIONS,
-        )
-        raw = analyze_visual(
-            state.get("image_path"), prompt, system,
-            description=state.get("product_description"),
-        )
-        done, parsed_q = _parse_decision(raw, fb)
-        question = parsed_q or fb
-    except Exception as e:
-        logger.warning("question_gen_node failed (%s) — using fallback question", e)
-        done, question = False, fb
 
-    # Enforce the minimum: the model can't stop early.
-    if answered < _MIN_ADAPTIVE:
-        done = False
+def _value_for(answer: str, options: list | None) -> str | None:
+    """Map a chosen label back to its option value (None if no match)."""
+    if not options:
+        return None
+    for o in options:
+        if o.get("label") == answer or o.get("value") == answer:
+            return o.get("value")
+    return None
 
-    if done:
-        logger.info("question_gen_node: interview complete after %d adaptive questions", answered)
-        return {"questions_done": True}
 
-    # Overwrite the slot for this index (defensive against any re-run).
-    questions = questions[:answered]
-    questions.append(question)
-    logger.info("question_gen_node produced adaptive Q%d (lang=%s)", answered + 1, language)
-    return {"questions": questions, "questions_done": False}
+def _parse_int(text: str, default: int) -> int:
+    digits = "".join(ch for ch in str(text) if ch.isdigit())
+    return int(digits) if digits else default
 
 
 def question_ask_node(state: dict) -> dict:
-    """Interrupt to collect the answer for the latest generated question.
+    """Interrupt to collect the answer for the pending question and store it."""
+    pending = dict(state.get("pending_question") or {})
+    result = interrupt(pending)
 
-    Interrupt payload: {"stage": "questions", "question": str, "index": int,
-                        "min": int, "max": int}
-    Resume payload:    {"answer": str}
+    if isinstance(result, dict):
+        answer = result.get("answer", "")
+    else:
+        answer = str(result)
+    answer = (answer or "").strip()
 
-    State reads:  questions, user_answers
-    State writes: user_answers (adds one)
-    """
-    questions = list(state.get("questions") or [])
-    answers = dict(state.get("user_answers") or {})
-    index = len(answers)
-    question = questions[index] if index < len(questions) else (questions[-1] if questions else "")
+    updates: dict = {"pending_answered": True, "errors": []}
 
-    result = interrupt({
-        "stage": "questions",
-        "question": question,
-        "index": index,
-        "min": MIN_QUESTIONS,
-        "max": MAX_QUESTIONS,
-    })
+    if pending.get("is_follow_up"):
+        log = list(state.get("follow_up_log") or [])
+        log.append({"q": pending.get("question", ""), "a": answer})
+        updates["follow_up_log"] = log
+        updates["last_answer_was_follow_up"] = True
+        logger.info("question_ask_node: stored follow-up answer")
+        return updates
 
-    answer = result.get("answer", "") if isinstance(result, dict) else str(result)
-    answers[str(index)] = answer
-    logger.info("question_ask_node collected adaptive answer %d", index + 1)
-    return {"user_answers": answers, "errors": []}
+    # Fixed question → store into real_estate_data + derive machine fields.
+    data = dict(state.get("real_estate_data") or {})
+    data_field = pending.get("data_field")
+    if data_field:
+        data[data_field] = answer
+    updates["real_estate_data"] = data
+    updates["last_answer_was_follow_up"] = False
+
+    key = pending.get("key")
+    options = pending.get("options")
+    if key == "campaign_duration":
+        val = _value_for(answer, options)
+        updates["campaign_duration_days"] = _parse_int(val or answer, 14)
+    elif key == "lead_destination":
+        val = _value_for(answer, options)
+        updates["lead_destination"] = (val or answer or "whatsapp").lower()
+
+    logger.info("question_ask_node: stored fixed answer for '%s'", key)
+    return updates
 
 
 def route_after_gen(state: dict) -> str:

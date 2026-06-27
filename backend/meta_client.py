@@ -264,6 +264,7 @@ class SimulatedMetaClient(MetaClient):
             "name": name,
             "status": "PAUSED",
             "objective": campaign.get("objective", "MESSAGES"),
+            "special_ad_categories": campaign.get("special_ad_categories", ["HOUSING"]),
             "created_time": _meta_now(),
             "account_id": f"act_{self._account_id}",
         }
@@ -460,11 +461,13 @@ class RealMetaClient(MetaClient):
 
         name = f"AutoMark — {product.get('type', 'Product')} — {objective}"
 
+        # Real estate ads MUST declare the HOUSING special ad category (CHANGE 5).
+        special_categories = campaign_data.get("special_ad_categories") or ["HOUSING"]
         params = {
             Campaign.Field.name: name,
             Campaign.Field.objective: objective,
             Campaign.Field.status: Campaign.Status.paused,
-            Campaign.Field.special_ad_categories: [],
+            Campaign.Field.special_ad_categories: special_categories,
             "is_adset_budget_sharing_enabled": False,
         }
         result = self._account().create_campaign(params=params)

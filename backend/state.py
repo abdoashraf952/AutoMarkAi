@@ -1,4 +1,4 @@
-"""Shared state schema for the AutoMark AI campaign generation pipeline."""
+"""Shared state schema for the AutoMark AI real-estate campaign pipeline."""
 
 import operator
 from typing import Annotated, TypedDict
@@ -11,54 +11,52 @@ def _merge_dicts(a: dict, b: dict) -> dict:
 
 class CampaignState(TypedDict, total=False):
     # --- inputs (set at START) ---
-    image_path: str
-    image_mode: str         # "use_original" | "enhance_with_ai" | "generate_with_ai"
-    # Owner-typed description of the product/business/service. Required (and used
-    # by the vision-less nodes) when the photo is skipped; empty otherwise.
-    product_description: str
-    marketing_type: str     # "product" | "business" | "service"
-    language: str           # "en" | "ar"
+    image_paths: list[str]   # Real unit photos uploaded by the user (1+, no AI images)
+    marketing_type: str      # Always "real_estate" — hardcoded, not user-selectable
+    language: str            # "en" | "ar"
     budget: float
     goal: str
+
+    # --- client assets (CHANGE 4: structured file uploads) ---
+    logo_path: str           # path to the uploaded company logo
+    asset_paths: dict        # {"brochure": path, "floor_plans": [..], "master_plan": path, "price_list": path}
 
     # --- campaign-target question (the one fixed question, asked first) ---
     campaign_target_options: list   # ranked [{label, description, goal, recommended}]
 
-    # --- question_generator_node output ---
-    # Dynamic count: basic questions first, follow-ups only when valuable,
-    # bounded by MIN_QUESTIONS/MAX_QUESTIONS.
-    questions: list[str]       # adaptive follow-up questions (variable length)
-    user_answers: dict          # {"0": answer, "1": answer, ...} (adaptive answers)
-    questions_done: bool        # set by question_gen_node to end the interview
+    # --- real estate interview (CHANGE 3) ---
+    # The interview alternates fixed questions (curated list) with optional
+    # LLM-generated follow-ups. Bookkeeping fields drive the gen/ask loop:
+    current_fixed_q_index: int      # index of the fixed question currently in play
+    is_follow_up: bool              # whether the pending question is an LLM follow-up
+    pending_question: dict          # interrupt payload built by question_gen_node
+    pending_answered: bool          # ask_node sets True after storing an answer
+    last_answer_was_follow_up: bool # whether the most recent answer was a follow-up
+    follow_up_log: list             # [{"q": .., "a": ..}] of follow-ups, for context
+    questions_done: bool            # set when the interview is complete
+
+    # Collected real estate facts (compound_name, location, unit_types, ...).
+    real_estate_data: dict
+    campaign_duration_days: int     # from the duration question (daily budget calc)
+    lead_destination: str           # "whatsapp" | "phone" | "instant_form" | "landing_page"
+
+    # Legacy adaptive-answer maps kept for orchestrator Q&A context.
+    user_answers: dict
 
     # --- orchestrator output ---
     campaign_plan: dict
 
     # --- strategy agent output (Strategist) ---
-    # Customized marketing plan: target_persona, channels, schedule (dayparting),
-    # cadence, messaging_angles, rationale. Produced before the fan-out so creative
-    # and media_buying can consume it; merge_node folds it into the bundle and uses
-    # target_persona as the source of truth for audience targeting.
     strategy_output: dict
 
     # --- sub-agent outputs ---
-    # creative_output now includes generated_images: list[str] (Edit 1)
+    # creative_output includes generated_images: list[str] (the user's real photos)
     creative_output: dict
     media_output: dict
 
-    # --- review state (Edit 3) ---
-    feedback: dict      # {"images": {int: str}, "creative": str}
-    review_stage: str   # "images" | "redo_creative" | "done"
-
-    # --- image-review sub-state (split review nodes) ---
-    # These let each image generation happen in its own checkpointed graph
-    # super-step so LangGraph never replays (and re-bills) a generation when
-    # the graph resumes from an interrupt.
-    image_history: list      # every image ever generated, in order
-    regen_count: int         # how many regeneration rounds have run
-    review_route: str        # router hint: "to_regen" | "to_pick" | "to_text"
-    regen_indices: list      # which image indices the user rejected
-    image_regen_feedback: dict  # {str(idx): "what to change"} for the rejected ones
+    # --- review state ---
+    feedback: dict      # {"creative": str}
+    review_stage: str   # "photos_selected" | "redo_creative" | "done"
 
     # --- final output ---
     campaign_bundle: dict

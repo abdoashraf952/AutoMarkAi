@@ -7,10 +7,10 @@ import { toDataUrl } from "@/lib/api";
 import { CopyKey, t } from "@/lib/copy";
 import { openStream, StreamHandle } from "@/lib/sse";
 import type {
+  AssetType,
   CampaignBundle,
-  ImageMode,
+  InterruptData,
   Language,
-  MarketingType,
   PublishResult,
   StageResponse,
   TargetOption,
@@ -21,20 +21,15 @@ import type {
 // ------------------------------------------------------------------ //
 export type ChatPhase =
   | "language"
-  | "marketing_type"
   | "image"
-  | "image_mode"
-  | "describe"
+  | "file_uploads"
   | "budget"
   | "starting"
   | "campaign_target"
   | "questions"
   | "building"
-  | "image_review"
-  | "image_regenerating"
-  | "max_regen"
+  | "photo_select"
   | "text_review"
-  | "text_editing"
   | "done"
   | "publishing"
   | "published"
@@ -45,7 +40,6 @@ export type LoaderKind = "analyze" | "build" | "image" | "publish";
 export type MessageKind =
   | "text"
   | "user-image"
-  | "image-card"
   | "image-grid"
   | "copy-card"
   | "done-card"
@@ -59,7 +53,7 @@ export interface ChatMessage {
   imageSrc?: string;
   imageCaption?: string;
   images?: string[]; // data URLs (image-grid)
-  hasOriginal?: boolean; // image-grid: first tile is the user's original photo
+  hasOriginal?: boolean;
   copy?: { copies: string[]; headlines: string[]; cta: string };
   bundle?: CampaignBundle;
   finalImage?: string;
@@ -72,10 +66,25 @@ export interface LoadingState {
   caption: string;
 }
 
+// Sequential client-asset upload steps (CHANGE 4). Logo is required.
+export interface AssetStep {
+  type: AssetType;
+  required: boolean;
+  titleKey: CopyKey;
+  whyKey: CopyKey;
+}
+export const ASSET_STEPS: AssetStep[] = [
+  { type: "logo", required: true, titleKey: "askLogo", whyKey: "logoWhy" },
+  { type: "brochure", required: false, titleKey: "askBrochure", whyKey: "brochureWhy" },
+  { type: "floor_plans", required: false, titleKey: "askFloorPlans", whyKey: "floorPlansWhy" },
+  { type: "master_plan", required: false, titleKey: "askMasterPlan", whyKey: "masterPlanWhy" },
+  { type: "price_list", required: false, titleKey: "askPriceList", whyKey: "priceListWhy" },
+];
+
 const PROGRESS_CAPTION: Record<string, string> = {
-  questions_ready: "Questions ready",
+  questions_ready: "Compound details captured",
   planning: "Campaign plan locked in",
-  creative: "Writing your ad copy & visuals",
+  creative: "Writing your ad copy",
   media_buying: "Crafting your media-buying strategy",
   bundle_ready: "Assembling your campaign",
 };
@@ -84,31 +93,23 @@ export function useCampaignChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [phase, setPhase] = useState<ChatPhase>("language");
   const [lang, setLang] = useState<Language>("en");
-  const [loading, setLoading] = useState<LoadingState>({
-    active: false,
-    kind: "analyze",
-    caption: "",
-  });
+  const [loading, setLoading] = useState<LoadingState>({ active: false, kind: "analyze", caption: "" });
   const [error, setError] = useState<string | null>(null);
 
   // setup collection
-  const setupRef = useRef<Partial<{
-    marketingType: MarketingType;
-    imageMode: ImageMode;
-    budget: number;
-    imageFile: File;
-    description: string;
-  }>>({});
+  const setupRef = useRef<Partial<{ budget: number; imageFiles: File[] }>>({});
 
   // campaign-target (the one fixed question — AI-ranked options)
   const [targetOptions, setTargetOptions] = useState<TargetOption[]>([]);
 
-  // questions (adaptive — one at a time, dynamic count, generated server-side)
-  const [qIndex, setQIndex] = useState(0);
+  // real estate interview — the current question payload
+  const [currentQuestion, setCurrentQuestion] = useState<InterruptData | null>(null);
 
-  // image review meta
-  const [canRegenerate, setCanRegenerate] = useState(true);
-  const [imageMeta, setImageMeta] = useState({ regenCount: 0, maxRegens: 2 });
+  // file uploads — which asset step we're on
+  const [assetIndex, setAssetIndex] = useState(0);
+
+  // photo selection — the uploaded photos to choose from
+  const [photoImages, setPhotoImages] = useState<string[]>([]);
 
   // session
   const sessionRef = useRef<string | null>(null);
@@ -117,20 +118,11 @@ export function useCampaignChat() {
   const bootedRef = useRef(false);
 
   const nextId = () => `m${idRef.current++}`;
-
   const pushMsg = useCallback((m: Omit<ChatMessage, "id">) => {
     setMessages((prev) => [...prev, { id: nextId(), ...m }]);
   }, []);
-
-  const botText = useCallback(
-    (text: string) => pushMsg({ role: "bot", kind: "text", text }),
-    [pushMsg]
-  );
-  const userText = useCallback(
-    (text: string) => pushMsg({ role: "user", kind: "text", text }),
-    [pushMsg]
-  );
-
+  const botText = useCallback((text: string) => pushMsg({ role: "bot", kind: "text", text }), [pushMsg]);
+  const userText = useCallback((text: string) => pushMsg({ role: "user", kind: "text", text }), [pushMsg]);
   const tr = useCallback((key: CopyKey, vars?: Record<string, string | number>) => t(lang, key, vars), [lang]);
 
   // ---------------------------------------------------------------- //
@@ -164,57 +156,19 @@ export function useCampaignChat() {
   const stopLoading = useCallback(() => setLoading((l) => ({ ...l, active: false })), []);
 
   // ---------------------------------------------------------------- //
-  // Central stage-response handler                                    //
+  // Central stage-response handler (post-interview stages)            //
   // ---------------------------------------------------------------- //
   const handleStage = useCallback(
     async (resp: StageResponse) => {
       const sid = sessionRef.current!;
       const stage = resp.stage;
 
-      if (stage === "image_review") {
-        const can = resp.data.can_regenerate !== false;
-        const regenCount = resp.data.regen_count ?? 0;
-        const maxRegens = resp.data.max_regens ?? 2;
-        setCanRegenerate(can);
-        setImageMeta({ regenCount, maxRegens });
-        const imgs = await api.getImages(sid);
-        const src = imgs.images[0] ? toDataUrl(imgs.images[0].data) : "";
-        stopLoading();
-        const remaining = maxRegens - regenCount;
-        botText(can ? tr("imageReviewIntro") : tr("imageConfirmIntro"));
-        if (can && regenCount > 0) {
-          botText(
-            remaining > 0
-              ? tr("regensLeft", { n: remaining })
-              : tr("regensNoneLeft")
-          );
-        }
-        const generated = setupRef.current.imageMode === "generate_with_ai";
-        pushMsg({
-          role: "bot",
-          kind: "image-card",
-          imageSrc: src,
-          imageCaption: generated
-            ? tr("aiCreatedImage")
-            : can
-            ? tr("enhancedImage")
-            : tr("yourPhoto"),
-        });
-        setPhase("image_review");
-        return;
-      }
-
-      if (stage === "max_regenerations_exceeded") {
+      if (stage === "photo_select") {
         const imgs = await api.getImages(sid);
         stopLoading();
-        botText(tr("maxRegenIntro"));
-        pushMsg({
-          role: "bot",
-          kind: "image-grid",
-          images: imgs.images.map((i) => toDataUrl(i.data)),
-          hasOriginal: resp.data.has_original === true,
-        });
-        setPhase("max_regen");
+        setPhotoImages(imgs.images.map((i) => toDataUrl(i.data)));
+        botText(tr("photoSelectIntro"));
+        setPhase("photo_select");
         return;
       }
 
@@ -235,26 +189,36 @@ export function useCampaignChat() {
       }
 
       if (stage === "done") {
-        const [result, imgs] = await Promise.all([
-          api.getResult(sid),
-          api.getImages(sid),
-        ]);
+        const [result, imgs] = await Promise.all([api.getResult(sid), api.getImages(sid)]);
         const finalImage = imgs.images[0] ? toDataUrl(imgs.images[0].data) : "";
         stopLoading();
         botText(tr("doneIntro"));
-        pushMsg({
-          role: "bot",
-          kind: "done-card",
-          bundle: result.bundle,
-          finalImage,
-        });
+        pushMsg({ role: "bot", kind: "done-card", bundle: result.bundle, finalImage });
         setPhase("done");
         return;
       }
-
-      // questions stage handled by caller (start)
     },
     [botText, pushMsg, stopLoading, tr]
+  );
+
+  const handleQuestionsOrStage = useCallback(
+    async (resp: StageResponse) => {
+      if (resp.stage === "questions") {
+        stopLoading();
+        setCurrentQuestion(resp.data);
+        const idx = resp.data.index ?? 0;
+        const total = resp.data.total_fixed ?? 8;
+        const header = resp.data.is_follow_up
+          ? tr("followUpProgress")
+          : tr("questionProgress", { n: idx + 1, total });
+        botText(`**${header}**\n\n${resp.data.question ?? ""}`);
+        setPhase("questions");
+      } else {
+        setLoading((l) => ({ ...l, kind: "build", caption: tr("buildingCampaign") }));
+        await handleStage(resp);
+      }
+    },
+    [botText, handleStage, stopLoading, tr]
   );
 
   // ---------------------------------------------------------------- //
@@ -265,95 +229,87 @@ export function useCampaignChat() {
       setLang(l);
       userText(l === "ar" ? "العربية (مصري)" : "English");
       setTimeout(() => {
-        botText(t(l, "askMarketingType"));
-        setPhase("marketing_type");
+        botText(t(l, "askUnitPhotos"));
+        setPhase("image");
       }, 250);
     },
     [botText, userText]
   );
 
-  const chooseMarketingType = useCallback(
-    (mt: MarketingType, label: string) => {
-      setupRef.current.marketingType = mt;
-      userText(label);
-      botText(tr("askImage"));
-      setPhase("image");
+  // Multiple unit photos uploaded. Create the session now so client assets can
+  // be uploaded during the file-uploads phase that follows.
+  const setImages = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return;
+      setupRef.current.imageFiles = files;
+      pushMsg({ role: "user", kind: "image-grid", images: files.map((f) => URL.createObjectURL(f)) });
+      try {
+        const session = await api.createSession();
+        sessionRef.current = session.session_id;
+        streamRef.current = openStream(session.session_id, (ev) => {
+          if (ev.event === "progress" && ev.stage && PROGRESS_CAPTION[ev.stage]) {
+            setLoading((l) => (l.active ? { ...l, caption: PROGRESS_CAPTION[ev.stage!] } : l));
+          }
+        });
+      } catch (e) {
+        fail(e);
+        return;
+      }
+      setAssetIndex(0);
+      botText(tr("uploadsIntro"));
+      setPhase("file_uploads");
     },
-    [botText, tr, userText]
+    [botText, fail, pushMsg, tr]
   );
 
-  const setImage = useCallback(
-    (file: File) => {
-      setupRef.current.imageFile = file;
-      const src = URL.createObjectURL(file);
-      pushMsg({ role: "user", kind: "user-image", imageSrc: src });
-      botText(tr("askImageMode"));
-      setPhase("image_mode");
+  // file_uploads — advance through ASSET_STEPS; on the last, go to budget.
+  const advanceAsset = useCallback(() => {
+    setAssetIndex((i) => {
+      const next = i + 1;
+      if (next >= ASSET_STEPS.length) {
+        botText(tr("askBudget"));
+        setPhase("budget");
+        return i;
+      }
+      return next;
+    });
+  }, [botText, tr]);
+
+  const uploadAssetFile = useCallback(
+    async (file: File) => {
+      const step = ASSET_STEPS[assetIndex];
+      pushMsg({ role: "user", kind: "user-image", imageSrc: URL.createObjectURL(file) });
+      try {
+        await api.uploadAsset(sessionRef.current!, step.type, file);
+      } catch (e) {
+        fail(e);
+        return;
+      }
+      advanceAsset();
     },
-    [botText, pushMsg, tr]
+    [advanceAsset, assetIndex, fail, pushMsg]
   );
 
-  // Skip the (optional) photo upload — AI will generate the visual instead.
-  // Since there's no image, we first ask the owner to describe what they're
-  // promoting so the target, questions, and plan are grounded in real info.
-  const skipImage = useCallback(() => {
-    setupRef.current.imageFile = undefined;
-    setupRef.current.imageMode = "generate_with_ai";
-    userText(tr("skipImage"));
-    botText(tr("askDescribe"));
-    setPhase("describe");
-  }, [botText, tr, userText]);
-
-  const setDescription = useCallback(
-    (text: string) => {
-      setupRef.current.description = text;
-      userText(text);
-      botText(tr("askBudget"));
-      setPhase("budget");
-    },
-    [botText, tr, userText]
-  );
-
-  const chooseImageMode = useCallback(
-    (mode: ImageMode) => {
-      setupRef.current.imageMode = mode;
-      userText(mode === "use_original" ? tr("useOriginal") : tr("enhanceAI"));
-      botText(tr("askBudget"));
-      setPhase("budget");
-    },
-    [botText, tr, userText]
-  );
+  const skipAsset = useCallback(() => {
+    userText(tr("fileSkip"));
+    advanceAsset();
+  }, [advanceAsset, tr, userText]);
 
   // After the budget we kick off the pipeline; the first interrupt is the
-  // AI-ranked campaign-target question (the one fixed question).
+  // AI-ranked campaign-target question.
   const beginPipeline = useCallback(async () => {
     const s = setupRef.current;
-    if (!s.budget || !s.marketingType || !s.imageMode) return;
+    if (!s.budget || !s.imageFiles?.length || !sessionRef.current) return;
     setPhase("starting");
-    startLoading("analyze", "Taking a look…");
+    startLoading("analyze", "Taking a look at your units…");
     try {
-      const session = await api.createSession();
-      sessionRef.current = session.session_id;
-
-      // Live progress captions while the blocking call runs.
-      streamRef.current = openStream(session.session_id, (ev) => {
-        if (ev.event === "progress" && ev.stage && PROGRESS_CAPTION[ev.stage]) {
-          setLoading((l) => (l.active ? { ...l, caption: PROGRESS_CAPTION[ev.stage!] } : l));
-        }
-      });
-
-      const resp = await api.startSession(session.session_id, {
+      const resp = await api.startSession(sessionRef.current, {
         budget: s.budget,
-        imageMode: s.imageMode,
-        marketingType: s.marketingType,
         language: lang,
-        imageFile: s.imageFile,
-        description: s.description,
+        imageFiles: s.imageFiles,
       });
-
-      // First interrupt: the ranked campaign-target options.
       stopLoading();
-      setTargetOptions(resp.data.options ?? []);
+      setTargetOptions((resp.data.options as TargetOption[]) ?? []);
       botText(tr("askTarget"));
       setPhase("campaign_target");
     } catch (e) {
@@ -371,24 +327,8 @@ export function useCampaignChat() {
   );
 
   // ---------------------------------------------------------------- //
-  // Campaign target — the fixed question, then the adaptive interview //
+  // Campaign target → real estate interview                          //
   // ---------------------------------------------------------------- //
-  const showFirstQuestionOrAdvance = useCallback(
-    async (resp: StageResponse) => {
-      if (resp.stage === "questions") {
-        const idx = resp.data.index ?? 0;
-        stopLoading();
-        setQIndex(idx);
-        botText(tr("questionsIntro"));
-        botText(`**${tr("questionProgress", { n: idx + 1 })}**\n\n${resp.data.question ?? ""}`);
-        setPhase("questions");
-      } else {
-        await handleStage(resp);
-      }
-    },
-    [botText, handleStage, stopLoading, tr]
-  );
-
   const chooseTarget = useCallback(
     async (goal: string, label: string) => {
       userText(label);
@@ -397,108 +337,50 @@ export function useCampaignChat() {
       startLoading("analyze", tr("thinkingNextQ"));
       try {
         const resp = await api.submitAnswer(sessionRef.current!, goal);
-        await showFirstQuestionOrAdvance(resp);
+        botText(tr("questionsIntro"));
+        await handleQuestionsOrStage(resp);
       } catch (e) {
         fail(e);
       }
     },
-    [fail, showFirstQuestionOrAdvance, startLoading, tr, userText]
+    [botText, fail, handleQuestionsOrStage, startLoading, tr, userText]
   );
 
   // ---------------------------------------------------------------- //
-  // Questions — one at a time, dynamic count                          //
+  // Questions — one at a time (free text / single / multi select)     //
   // ---------------------------------------------------------------- //
   const answerQuestion = useCallback(
-    async (text: string) => {
-      userText(text);
+    async (answer: string, displayLabel?: string) => {
+      userText(displayLabel ?? answer);
+      setCurrentQuestion(null);
       setPhase("building");
-      // We don't know if this is the last question (dynamic), so use a neutral
-      // caption; if the interview ends, the build/image loader takes over.
       startLoading("analyze", tr("thinkingNextQ"));
       try {
-        const resp = await api.submitAnswer(sessionRef.current!, text);
-        if (resp.stage === "questions") {
-          // Backend generated the next adaptive question.
-          const idx = resp.data.index ?? qIndex + 1;
-          stopLoading();
-          setQIndex(idx);
-          botText(`**${tr("questionProgress", { n: idx + 1 })}**\n\n${resp.data.question ?? ""}`);
-          setPhase("questions");
-        } else {
-          // Interview complete → pipeline moved on (image review, etc.)
-          setLoading((l) => ({ ...l, kind: "build", caption: tr("buildingCampaign") }));
-          await handleStage(resp);
-        }
+        const resp = await api.submitAnswer(sessionRef.current!, answer);
+        await handleQuestionsOrStage(resp);
       } catch (e) {
         fail(e);
       }
     },
-    [botText, fail, handleStage, qIndex, startLoading, stopLoading, tr, userText]
+    [fail, handleQuestionsOrStage, startLoading, tr, userText]
   );
 
   // ---------------------------------------------------------------- //
-  // Image review                                                      //
+  // Photo selection                                                   //
   // ---------------------------------------------------------------- //
-  const approveImage = useCallback(async () => {
-    userText(tr("approve"));
-    setPhase("building");
-    startLoading("build", "Locking in your visual…");
-    try {
-      const resp = await api.imageDecision(sessionRef.current!, { action: "approve" });
-      await handleStage(resp);
-    } catch (e) {
-      fail(e);
-    }
-  }, [fail, handleStage, startLoading, tr, userText]);
-
-  const regenerateImage = useCallback(
-    async (feedback: string) => {
-      userText(feedback);
-      setPhase("image_regenerating");
-      startLoading("image", tr("regenerating"));
+  const confirmPhotos = useCallback(
+    async (indices: number[]) => {
+      userText(tr("confirmPhotos"));
+      setPhase("building");
+      startLoading("build", tr("buildingCampaign"));
       try {
-        const resp = await api.imageDecision(sessionRef.current!, {
-          action: "regenerate",
-          approved: [false],
-          feedback: { "0": feedback || "regenerate" },
-        });
+        const resp = await api.selectPhotos(sessionRef.current!, indices);
         await handleStage(resp);
       } catch (e) {
         fail(e);
       }
     },
     [fail, handleStage, startLoading, tr, userText]
-  );
-
-  // Regenerations exhausted: don't fake another generation — ask the backend
-  // for the picker (it returns the full image history to choose from).
-  const gatherVersions = useCallback(async () => {
-    userText(tr("seeAllVersions"));
-    setPhase("building");
-    startLoading("build", tr("gatheringVersions"));
-    try {
-      const resp = await api.imageDecision(sessionRef.current!, {
-        action: "show_history",
-      });
-      await handleStage(resp);
-    } catch (e) {
-      fail(e);
-    }
-  }, [fail, handleStage, startLoading, tr, userText]);
-
-  const pickImage = useCallback(
-    async (index: number) => {
-      userText(`Image ${index + 1}`);
-      setPhase("building");
-      startLoading("build", "Applying your selection…");
-      try {
-        const resp = await api.pickImage(sessionRef.current!, index);
-        await handleStage(resp);
-      } catch (e) {
-        fail(e);
-      }
-    },
-    [fail, handleStage, startLoading, userText]
   );
 
   // ---------------------------------------------------------------- //
@@ -557,15 +439,14 @@ export function useCampaignChat() {
     setupRef.current = {};
     idRef.current = 0;
     setMessages([]);
-    setQIndex(0);
     setTargetOptions([]);
-    setCanRegenerate(true);
-    setImageMeta({ regenCount: 0, maxRegens: 2 });
+    setCurrentQuestion(null);
+    setAssetIndex(0);
+    setPhotoImages([]);
     setError(null);
     setLoading({ active: false, kind: "analyze", caption: "" });
     setLang("en");
     setPhase("language");
-    // re-greet
     botText(t("en", "greeting"));
     botText(t("en", "askLanguage"));
   }, [botText]);
@@ -578,25 +459,21 @@ export function useCampaignChat() {
     error,
     // setup
     chooseLanguage,
-    chooseMarketingType,
-    setImage,
-    skipImage,
-    setDescription,
-    chooseImageMode,
+    setImages,
+    // file uploads
+    assetStep: ASSET_STEPS[assetIndex],
+    uploadAssetFile,
+    skipAsset,
     setBudget,
     // campaign target
     targetOptions,
     chooseTarget,
     // questions
-    qIndex,
+    currentQuestion,
     answerQuestion,
-    // image review
-    canRegenerate,
-    remainingRegens: imageMeta.maxRegens - imageMeta.regenCount,
-    approveImage,
-    regenerateImage,
-    gatherVersions,
-    pickImage,
+    // photo select
+    photoImages,
+    confirmPhotos,
     // text review
     submitText,
     // publish

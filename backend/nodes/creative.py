@@ -1,34 +1,31 @@
-"""Creative node — generates ad copies, headlines, CTA, visual prompt, and ad images."""
+"""Creative node — generates ad copies, headlines, and CTA.
+
+CHANGE 2: NO AI image generation or enhancement. Real estate ads must use the
+agency's actual unit photos. This node only writes copy text and attaches the
+user's uploaded photos (read from state["image_paths"]) as the ad creatives.
+"""
 
 import base64
 import json
 import logging
-import os
 
-from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm, enhance_ad_image, generate_ad_images
+from AutoMarkAi.backend.llm_client import _parse_json_with_retry, call_llm
 from AutoMarkAi.backend.i18n import get_creative_prompts
 from AutoMarkAi.backend.strategy_tools import build_strategy_context
 
 logger = logging.getLogger(__name__)
 
-NUM_GENERATED_IMAGES = int(os.getenv("NUM_GENERATED_IMAGES", "1"))
-
 
 def creative_node(state: dict) -> dict:
     """
-    Generate ad creative assets from campaign_plan.
+    Generate ad creative copy from campaign_plan and attach the real unit photos.
 
-    Picks prompts from the locale system (language + marketing_type).
-    Appends user feedback on redo passes.
-    Sources the ad image based on image_mode.
-
-    State reads:  campaign_plan, budget, goal, image_mode, image_path, feedback, language, marketing_type
+    State reads:  campaign_plan, budget, goal, image_paths, feedback, language
     State writes: creative_output, llm_used, errors
     """
-    # Resolve language / marketing_type from plan or state (plan is authoritative after orchestrator)
     plan = state.get("campaign_plan") or {}
     language = plan.get("language") or state.get("language", "en")
-    marketing_type = plan.get("marketing_type") or state.get("marketing_type", "product")
+    marketing_type = plan.get("marketing_type") or state.get("marketing_type", "real_estate")
 
     system, user_template = get_creative_prompts(language, marketing_type)
 
@@ -56,63 +53,34 @@ def creative_node(state: dict) -> dict:
             feedback_context=feedback_context,
         )
 
-        # Lead with the Strategist's persona + messaging angles when available,
-        # so the copy speaks directly to the right audience.
         strategy_context = build_strategy_context(state.get("strategy_output"), language)
         if strategy_context:
             prompt = f"{strategy_context}\n\n{prompt}"
 
         raw, provider = call_llm(prompt, system, "creative", allow_fallback=True)
         creative_output = _parse_json_with_retry(raw)
+        # No AI visuals for real estate — strip any visual_prompt the model added.
+        creative_output.pop("visual_prompt", None)
 
-        # Source ad image based on image_mode
-        image_mode = state.get("image_mode", "use_original")
-        image_path = state.get("image_path", "")
-        visual_prompt = creative_output.get("visual_prompt", "")
-        generated_images: list[str] = []
-        img_errors: list[str] = []
-
-        # On a text-only redo pass (user asked to change the copy), reuse the
-        # previously approved image instead of regenerating a brand-new one.
+        # On a copy-only redo pass, keep the already-attached photos.
         prev_images = (state.get("creative_output") or {}).get("generated_images") or []
+        img_errors: list[str] = []
         if creative_feedback and prev_images:
             generated_images = list(prev_images)
-            logger.info(
-                "creative_node: redo pass — reusing %d existing image(s), skipping image regeneration",
-                len(generated_images),
-            )
-        elif image_mode == "use_original":
-            if image_path:
+            logger.info("creative_node: redo pass — reusing %d photo(s)", len(generated_images))
+        else:
+            generated_images = []
+            for path in state.get("image_paths") or []:
                 try:
-                    with open(image_path, "rb") as fh:
-                        generated_images = [base64.b64encode(fh.read()).decode("utf-8")]
-                    logger.info("creative_node: using original uploaded photo")
+                    with open(path, "rb") as fh:
+                        generated_images.append(base64.b64encode(fh.read()).decode("utf-8"))
                 except OSError as e:
-                    img_errors.append(f"original_image_read_failed: {e}")
-
-        elif visual_prompt:
-            if image_mode == "enhance_with_ai" and image_path:
-                try:
-                    generated_images = enhance_ad_image(image_path, visual_prompt, n=NUM_GENERATED_IMAGES)
-                    logger.info("creative_node: enhanced %d images", len(generated_images))
-                except RuntimeError as e:
-                    logger.warning("creative_node: enhancement failed, falling back to generate: %s", e)
-                    img_errors.append(f"image_enhancement_failed: {e}")
-                    try:
-                        generated_images = generate_ad_images(visual_prompt, n=NUM_GENERATED_IMAGES)
-                    except RuntimeError as e2:
-                        img_errors.append(f"image_generation_fallback_failed: {e2}")
-            else:
-                try:
-                    generated_images = generate_ad_images(visual_prompt, n=NUM_GENERATED_IMAGES)
-                    logger.info("creative_node generated %d images", len(generated_images))
-                except RuntimeError as e:
-                    logger.warning("creative_node: image generation failed: %s", e)
-                    img_errors.append(f"image_generation_failed: {e}")
+                    img_errors.append(f"image_read_failed: {e}")
+            logger.info("creative_node: attached %d unit photo(s)", len(generated_images))
 
         creative_output["generated_images"] = generated_images
 
-        logger.info("creative_node complete via %s (lang=%s type=%s)", provider, language, marketing_type)
+        logger.info("creative_node complete via %s (lang=%s)", provider, language)
         return {
             "creative_output": creative_output,
             "llm_used": {"creative": provider},

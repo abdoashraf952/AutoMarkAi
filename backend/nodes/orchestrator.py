@@ -4,56 +4,63 @@ import logging
 
 from AutoMarkAi.backend.llm_client import _parse_json_with_retry, analyze_visual
 from AutoMarkAi.backend.i18n import get_orchestrator_prompts
+from AutoMarkAi.backend.real_estate_utils import get_price_tier
 
 logger = logging.getLogger(__name__)
 
 
+def _build_qa_context(state: dict) -> str:
+    """Render the real estate interview answers + follow-ups for the planner."""
+    data = state.get("real_estate_data") or {}
+    follow_ups = state.get("follow_up_log") or []
+    if not data and not follow_ups:
+        return ""
+    lines = ["Real estate project details collected from the owner:\n"]
+    for k, v in data.items():
+        if v:
+            lines.append(f"- {k.replace('_', ' ')}: {v}")
+    for fu in follow_ups:
+        if fu.get("a"):
+            lines.append(f"- {fu.get('q')} → {fu.get('a')}")
+    return "\n".join(lines) + "\n\n"
+
+
 def orchestrator_node(state: dict) -> dict:
     """
-    Analyze the product/business/service image and user inputs to produce campaign_plan.
+    Analyze the unit photos and interview answers to produce campaign_plan.
 
-    Uses Gemini's multimodal (vision) model. On failure, writes to errors and
-    returns an empty campaign_plan.
-
-    State reads:  image_path, budget, goal, marketing_type, language, questions, user_answers
+    State reads:  image_paths, budget, goal, language, real_estate_data, follow_up_log
     State writes: campaign_plan, llm_used, errors
     """
     language = state.get("language", "en")
-    marketing_type = state.get("marketing_type", "product")
+    marketing_type = state.get("marketing_type", "real_estate")
 
     system, user_template = get_orchestrator_prompts(language, marketing_type)
 
     try:
-        # Build Q&A context block from question_generator_node
-        questions = state.get("questions") or []
-        answers = state.get("user_answers") or {}
-        qa_context = ""
-        if questions and answers:
-            lines = ["Additional context from user Q&A:\n"]
-            for i, question in enumerate(questions):
-                answer = answers.get(str(i), answers.get(i, ""))
-                if answer:
-                    lines.append(f"Q: {question}")
-                    lines.append(f"A: {answer}\n")
-            qa_context = "\n".join(lines) + "\n"
-
         prompt = user_template.format(
             budget=state["budget"],
             goal=state["goal"],
-            qa_context=qa_context,
+            qa_context=_build_qa_context(state),
         )
 
-        raw = analyze_visual(
-            state.get("image_path"), prompt, system,
-            description=state.get("product_description"),
-        )
+        image_paths = state.get("image_paths") or []
+        raw = analyze_visual(image_paths[0] if image_paths else None, prompt, system)
         campaign_plan = _parse_json_with_retry(raw)
 
-        # Inject language and marketing_type into the plan so downstream nodes can use them
+        # Inject language / marketing_type so downstream nodes can use them.
         campaign_plan["language"] = language
         campaign_plan["marketing_type"] = marketing_type
+        campaign_plan["special_ad_category"] = "HOUSING"
 
-        logger.info("orchestrator_node produced campaign_plan (lang=%s type=%s)", language, marketing_type)
+        # Smart defaults from the price tier (CHANGE 8).
+        starting_price = (state.get("real_estate_data") or {}).get("starting_price")
+        tier = get_price_tier(starting_price)
+        campaign_plan["price_tier"] = tier
+        # Let the tier set the tone when the model didn't provide a strong one.
+        campaign_plan.setdefault("tone", tier["tone"])
+
+        logger.info("orchestrator_node produced campaign_plan (tier=%s)", tier["tier"])
         return {
             "campaign_plan": campaign_plan,
             "llm_used": {"orchestrator": "gemini"},

@@ -92,6 +92,29 @@ def merge_node(state: dict) -> dict:
             audience["locations"] = persona["locations"]
         media["audience"] = audience
 
+    # --- HOUSING compliance — hard override (CHANGE 5) ---
+    # Real estate ads fall under Meta's HOUSING Special Ad Category: no age/gender
+    # narrowing. This wins over the Strategist persona above.
+    audience = dict(media.get("audience") or {})
+    audience["age_min"] = 18
+    audience["age_max"] = 65
+    audience["genders"] = ["all"]
+    audience.pop("income_tier", None)
+    if not audience.get("locations"):
+        audience["locations"] = ["EG"]
+    media["audience"] = audience
+
+    # --- Daily budget from campaign duration (CHANGE 9) ---
+    duration = state.get("campaign_duration_days") or 14
+    try:
+        total_budget = float(state.get("budget") or 0)
+    except (TypeError, ValueError):
+        total_budget = 0.0
+    if total_budget > 0 and duration > 0:
+        media["daily_budget_usd"] = round(total_budget / duration, 2)
+
+    real_estate_data = state.get("real_estate_data") or {}
+
     # --- Assemble campaign_bundle ---
     campaign_bundle = {
         "meta": {
@@ -100,20 +123,31 @@ def merge_node(state: dict) -> dict:
             "warnings": errors,
         },
         "product": {
-            "type": plan.get("product_type", ""),
+            "type": plan.get("product_type", "Real Estate"),
             "description": plan.get("product_description", ""),
         },
         "campaign": {
             "platform": plan.get("platform", ""),
             "objective": plan.get("objective", ""),
             "tone": plan.get("tone", ""),
+            "special_ad_categories": ["HOUSING"],
+        },
+        "real_estate_project": {
+            "compound_name": real_estate_data.get("compound_name", ""),
+            "location": real_estate_data.get("location", ""),
+            "unit_types": real_estate_data.get("unit_types", ""),
+            "starting_price": real_estate_data.get("starting_price", ""),
+            "payment_plan": real_estate_data.get("payment_plan", ""),
+            "offer": real_estate_data.get("offer", ""),
+            "lead_destination": state.get("lead_destination", "whatsapp"),
+            "campaign_duration_days": state.get("campaign_duration_days", 14),
+            "price_tier": (plan.get("price_tier") or {}).get("tier", ""),
         },
         "creative": {
             "copies": creative.get("copies", []),
             "headlines": creative.get("headlines", []),
             "cta": creative.get("cta", ""),
-            "visual_prompt": creative.get("visual_prompt", ""),
-            "generated_images": creative.get("generated_images", []),  # Edit 1
+            "generated_images": creative.get("generated_images", []),  # user's real photos
         },
         "media": {
             "budget_split": media.get("budget_split", {}),

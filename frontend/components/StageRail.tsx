@@ -4,11 +4,11 @@ import { motion } from "framer-motion";
 import type { ChatPhase } from "@/hooks/useCampaignChat";
 
 const STEPS = [
-  { key: "setup", label: "Set up", emoji: "👋" },
+  { key: "setup", label: "Photos & files", emoji: "📸" },
   { key: "goal", label: "Your goal", emoji: "🎯" },
-  { key: "questions", label: "Quick chat", emoji: "💬" },
-  { key: "picture", label: "Picture", emoji: "🖼️" },
-  { key: "words", label: "Words", emoji: "✍️" },
+  { key: "questions", label: "Compound", emoji: "🏗️" },
+  { key: "photos", label: "Pick photos", emoji: "🖼️" },
+  { key: "words", label: "Ad copy", emoji: "✍️" },
   { key: "launch", label: "Launch", emoji: "🚀" },
 ];
 
@@ -16,10 +16,8 @@ const STEPS = [
 function phaseToIndex(phase: ChatPhase): number {
   switch (phase) {
     case "language":
-    case "marketing_type":
     case "image":
-    case "image_mode":
-    case "describe":
+    case "file_uploads":
     case "budget":
     case "starting":
       return 0;
@@ -28,12 +26,9 @@ function phaseToIndex(phase: ChatPhase): number {
     case "questions":
     case "building":
       return 2;
-    case "image_review":
-    case "image_regenerating":
-    case "max_regen":
+    case "photo_select":
       return 3;
     case "text_review":
-    case "text_editing":
       return 4;
     case "done":
     case "publishing":

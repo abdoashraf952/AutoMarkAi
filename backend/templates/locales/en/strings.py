@@ -1,37 +1,29 @@
-"""English UI strings and labels."""
+"""English UI strings and labels — real estate."""
 
 MARKETING_TYPE_LABELS = {
-    "product": "Product",
-    "business": "Business",
-    "service": "Service",
+    "real_estate": "Real Estate",
 }
 
 MARKETING_TYPE_DESCRIPTIONS = {
-    "product": "A physical or digital item you sell (e.g. gadget, clothing, food, app)",
-    "business": "A business entity you want to promote (e.g. restaurant, clinic, shop)",
-    "service": "A service you offer (e.g. consulting, cleaning, tutoring, design)",
+    "real_estate": "An Egyptian real estate compound or project you want to advertise",
 }
 
 STAGE_LABELS = {
-    "setup": "1. Setup",
-    "questions": "2. Product Questions",
-    "image_review": "3. Image Review",
-    "max_regenerations_exceeded": "3b. Choose Image",
-    "text_review": "4. Copy Review",
-    "done": "5. Complete",
+    "setup": "1. Photos & Files",
+    "questions": "2. Compound Details",
+    "campaign_target": "3. Campaign Setup",
+    "photo_select": "4. Photo Selection",
+    "text_review": "5. Ad Copy Review",
+    "done": "6. Publish",
 }
 
 SETUP_HEADER = "Campaign Setup"
-QUESTIONS_HEADER = "Tell Us About Your {marketing_type}"
+QUESTIONS_HEADER = "Tell Us About Your Compound"
 QUESTIONS_SUBTEXT = "Answer these questions so we can craft the perfect campaign:"
-IMAGE_REVIEW_HEADER_ORIGINAL = "Review Your Photo"
-IMAGE_REVIEW_HEADER_ENHANCED = "Review Enhanced Ad Image"
-IMAGE_REVIEW_SUBTEXT_ORIGINAL = "Confirm your photo looks correct before we continue."
-IMAGE_REVIEW_SUBTEXT_ENHANCED = "Review the AI-enhanced ad image. Approve it or request a re-enhancement."
+PHOTO_SELECT_HEADER = "Choose Your Photos"
+PHOTO_SELECT_SUBTEXT = "Pick which of your uploaded unit photos to include in the ad."
 TEXT_REVIEW_HEADER = "Review Ad Copy"
 DONE_HEADER = "Campaign Ready"
-MAX_REGEN_HEADER = "Maximum Regenerations Exceeded"
-MAX_REGEN_SUBTEXT = "Choose one of the previously generated images to continue:"
 
 SIMULATION_BANNER = (
     "Running in demo mode — connect Meta credentials in `.env` "

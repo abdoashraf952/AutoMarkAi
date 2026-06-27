@@ -6,9 +6,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 SUPPORTED_LANGUAGES = ("en", "ar")
-SUPPORTED_MARKETING_TYPES = ("product", "business", "service")
+# The app is now real-estate only — marketing_type is always "real_estate".
+SUPPORTED_MARKETING_TYPES = ("real_estate",)
 DEFAULT_LANGUAGE = "en"
-DEFAULT_MARKETING_TYPE = "product"
+DEFAULT_MARKETING_TYPE = "real_estate"
 
 
 def _load(module_name: str, language: str) -> object:

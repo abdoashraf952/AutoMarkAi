@@ -3,7 +3,6 @@
 import { motion } from "framer-motion";
 import type { ChatMessage } from "@/hooks/useCampaignChat";
 import MarkdownLite from "./MarkdownLite";
-import ImageCard from "./cards/ImageCard";
 import ImageGrid from "./cards/ImageGrid";
 import CopyCard from "./cards/CopyCard";
 import DoneCard from "./cards/DoneCard";
@@ -88,9 +87,6 @@ function Content({
           <img src={message.imageSrc} alt="Uploaded" className="max-h-52 w-auto object-cover" />
         </div>
       );
-
-    case "image-card":
-      return <ImageCard src={message.imageSrc || ""} caption={message.imageCaption} />;
 
     case "image-grid":
       return (

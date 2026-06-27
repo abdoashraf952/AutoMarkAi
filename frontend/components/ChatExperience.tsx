@@ -19,7 +19,7 @@ export default function ChatExperience({ onEnd }: { onEnd: () => void }) {
           </div>
           <div className="text-left leading-tight">
             <h1 className="text-sm font-semibold accent-gradient-text">AutoMark AI</h1>
-            <p className="text-[11px] text-white/40">Your friendly ad helper</p>
+            <p className="text-[11px] text-white/40">Your real estate campaign assistant</p>
           </div>
         </button>
         <span className="chip">

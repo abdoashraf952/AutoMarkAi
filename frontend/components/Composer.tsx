@@ -2,19 +2,21 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import type { CampaignChat } from "@/hooks/useCampaignChat";
-import { MARKETING_TYPE_OPTIONS, t } from "@/lib/copy";
+import { t } from "@/lib/copy";
+import type { QuestionOption } from "@/lib/types";
 import LoadingArt from "./LoadingArt";
 import OptionCards from "./steps/OptionCards";
 import ImageUpload from "./steps/ImageUpload";
+import FileUploadStep from "./steps/FileUploadStep";
 import BudgetInput from "./steps/BudgetInput";
 import TextSend from "./steps/TextSend";
-import ReviewActions from "./steps/ReviewActions";
 import CampaignTargetCards from "./steps/CampaignTargetCards";
+import QuestionWithOptions from "./steps/QuestionWithOptions";
+import PhotoSelectGrid from "./steps/PhotoSelectGrid";
 
 /**
- * The docked, context-aware input area. It renders exactly the control the
- * current conversational phase needs — nothing more. This is what makes the
- * flow feel like a guided chat instead of a giant form.
+ * The docked, context-aware input area. Renders exactly the control the current
+ * conversational phase needs — nothing more.
  */
 export default function Composer({
   chat,
@@ -68,53 +70,26 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
         />
       );
 
-    case "marketing_type":
-      return (
-        <OptionCards
-          options={MARKETING_TYPE_OPTIONS[lang]}
-          onPick={(v, label) => chat.chooseMarketingType(v as any, label)}
-        />
-      );
-
     case "image":
       return (
         <ImageUpload
-          onSelect={chat.setImage}
-          onSkip={chat.skipImage}
-          skipLabel={tr("skipImage")}
+          onSelect={chat.setImages}
+          label={tr("askUnitPhotos")}
           invalidMsg={tr("imageInvalid")}
+          doneLabel={tr("confirmSelection")}
           rtl={rtl}
         />
       );
 
-    case "image_mode":
+    case "file_uploads":
       return (
-        <OptionCards
-          columns={2}
-          options={[
-            {
-              value: "use_original",
-              label: tr("useOriginal"),
-              sub: rtl ? "صورتك زي ما هي" : "Your photo, as-is",
-              emoji: "🖼️",
-            },
-            {
-              value: "enhance_with_ai",
-              label: tr("enhanceAI"),
-              sub: rtl ? "تحسين بالذكاء الاصطناعي" : "Polished, ad-ready look",
-              emoji: "✨",
-            },
-          ]}
-          onPick={(v) => chat.chooseImageMode(v as any)}
-        />
-      );
-
-    case "describe":
-      return (
-        <TextSend
-          placeholder={tr("describePlaceholder")}
-          sendLabel={tr("send")}
-          onSend={chat.setDescription}
+        <FileUploadStep
+          title={tr(chat.assetStep.titleKey)}
+          why={tr(chat.assetStep.whyKey)}
+          required={chat.assetStep.required}
+          skipLabel={tr("fileSkip")}
+          onSelect={chat.uploadAssetFile}
+          onSkip={chat.skipAsset}
           rtl={rtl}
         />
       );
@@ -131,50 +106,42 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
         />
       );
 
-    case "questions":
-      return (
-        <TextSend
-          placeholder={rtl ? "اكتب إجابتك…" : "Type your answer…"}
-          sendLabel={tr("submitAnswer")}
-          onSend={chat.answerQuestion}
-          rtl={rtl}
-          autoFocusKey={chat.qIndex}
-        />
-      );
-
-    case "image_review":
-      // Regenerations exhausted: offer "choose from all versions" instead of a
-      // misleading regenerate that would never produce a new image.
-      if (chat.canRegenerate && chat.remainingRegens <= 0) {
+    case "questions": {
+      const q = chat.currentQuestion;
+      const type = q?.question_type ?? "free_text";
+      if (type === "free_text" || !q?.options) {
         return (
-          <div className="flex flex-wrap gap-2.5">
-            <button onClick={chat.approveImage} className="btn-primary flex-1">
-              ✓ {tr("approve")}
-            </button>
-            <button onClick={chat.gatherVersions} className="btn-ghost flex-1">
-              🖼️ {tr("seeAllVersions")}
-            </button>
-          </div>
+          <TextSend
+            placeholder={tr("otherPlaceholder")}
+            sendLabel={tr("submitAnswer")}
+            onSend={(text) => chat.answerQuestion(text)}
+            rtl={rtl}
+            autoFocusKey={`${q?.index ?? 0}-${q?.is_follow_up ? "f" : "q"}`}
+          />
         );
       }
       return (
-        <ReviewActions
-          approveLabel={tr("approve")}
-          changeLabel={tr("regenerate")}
-          feedbackPlaceholder={tr("feedbackPlaceholderImg")}
-          onApprove={chat.approveImage}
-          onChange={chat.regenerateImage}
+        <QuestionWithOptions
+          options={q.options as QuestionOption[]}
+          multi={type === "multi_select_with_other"}
+          onSubmit={(answer, label) => chat.answerQuestion(answer, label)}
+          lang={lang}
+        />
+      );
+    }
+
+    case "photo_select":
+      return (
+        <PhotoSelectGrid
+          images={chat.photoImages}
+          confirmLabel={tr("confirmPhotos")}
+          onConfirm={chat.confirmPhotos}
           rtl={rtl}
-          approveOnly={!chat.canRegenerate}
         />
       );
 
     case "text_review":
-      // Selection + manual edit happens inside the copy card above.
       return <p className="text-center text-sm text-white/55">{tr("pickEditHint")}</p>;
-
-    case "max_regen":
-      return <p className="text-center text-sm text-white/55">{tr("pickAbove")}</p>;
 
     case "done":
       return (

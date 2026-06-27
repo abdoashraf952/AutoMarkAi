@@ -6,15 +6,18 @@
 export type BackendStage =
   | "campaign_target"
   | "questions"
-  | "image_review"
-  | "max_regenerations_exceeded"
+  | "photo_select"
   | "text_review"
   | "done";
 
-export type MarketingType = "product" | "business" | "service";
-/** "generate_with_ai" is used when the user skips the photo upload. */
-export type ImageMode = "use_original" | "enhance_with_ai" | "generate_with_ai";
+export type MarketingType = "real_estate";
 export type Language = "en" | "ar";
+
+/** Real estate interview question shapes. */
+export type QuestionType =
+  | "free_text"
+  | "single_select_with_other"
+  | "multi_select_with_other";
 
 /** One AI-ranked campaign-goal option (campaign_target interrupt). */
 export interface TargetOption {
@@ -23,6 +26,16 @@ export interface TargetOption {
   goal: string; // natural-language goal sentence sent back as the answer
   recommended: boolean;
 }
+
+/** One selectable option in a real estate interview question. */
+export interface QuestionOption {
+  label: string;
+  value: string;
+  recommended: boolean;
+}
+
+/** Client asset types uploaded one-by-one before the interview. */
+export type AssetType = "logo" | "brochure" | "floor_plans" | "master_plan" | "price_list";
 
 /** Common envelope returned by /start, /answers, /image-decision, etc. */
 export interface StageResponse {
@@ -33,25 +46,18 @@ export interface StageResponse {
 /** _safe_data payloads — images are stripped to placeholder strings. */
 export interface InterruptData {
   stage?: BackendStage;
-  marketing_type?: MarketingType;
   // campaign_target (the one fixed question — ranked multiple choice)
-  options?: TargetOption[];
-  // questions (adaptive — one at a time, dynamic count)
+  options?: TargetOption[] | QuestionOption[];
+  // questions (real estate interview — one at a time)
   question?: string;
+  question_type?: QuestionType;
+  allow_other?: boolean;
+  is_follow_up?: boolean;
   index?: number;
-  total?: number;
-  min?: number;
-  max?: number;
-  questions?: string[]; // legacy/batch (no longer used by the UI)
-  // image_review
+  total_fixed?: number;
+  // photo_select
   images?: string[]; // placeholders like "<image_0>"
-  regen_count?: number;
-  max_regens?: number;
-  can_regenerate?: boolean;
-  // max_regenerations_exceeded
-  image_history?: string[];
-  has_original?: boolean;
-  message?: string;
+  count?: number;
   // text_review
   copies?: string[];
   headlines?: string[];
@@ -69,17 +75,12 @@ export interface ImagesResponse {
 
 export interface SetupData {
   budget: number;
-  imageMode: ImageMode;
-  marketingType: MarketingType;
   language: Language;
-  imageFile?: File; // optional — omitted when the user lets AI generate the image
-  description?: string; // owner's typed description; required when imageFile is omitted
+  imageFiles: File[]; // required — at least one real unit photo
 }
 
-export interface ImageDecisionBody {
-  action: "approve" | "regenerate" | "show_history";
-  approved?: boolean[];
-  feedback?: Record<string, string>;
+export interface PhotoSelectBody {
+  selected_indices: number[];
 }
 
 export interface TextDecisionBody {
@@ -99,7 +100,18 @@ export interface PublishBody {
 export interface CampaignBundle {
   meta?: { generated_at?: string; llm_used?: Record<string, string>; warnings?: string[] };
   product?: { type?: string; description?: string };
-  campaign?: { platform?: string; objective?: string; tone?: string };
+  campaign?: { platform?: string; objective?: string; tone?: string; special_ad_categories?: string[] };
+  real_estate_project?: {
+    compound_name?: string;
+    location?: string;
+    unit_types?: string;
+    starting_price?: string;
+    payment_plan?: string;
+    offer?: string;
+    lead_destination?: string;
+    campaign_duration_days?: number;
+    price_tier?: string;
+  };
   creative?: {
     copies?: string[];
     headlines?: string[];

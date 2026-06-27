@@ -51,54 +51,53 @@ def test_orchestrator_returns_valid_campaign_plan():
 # Test 2: creative_node returns exactly three copies
 # ---------------------------------------------------------------------------
 
-def test_creative_node_returns_three_copies():
-    """Creative node should produce exactly 3 ad copies and 3 headlines."""
+def test_creative_node_returns_three_copies(tmp_path):
+    """Creative node should produce 3 copies/headlines and attach the real photos."""
+    import base64
     from AutoMarkAi.backend.nodes.creative import creative_node
 
     mock_creative = {
         "copies": [
-            "Timeless elegance on your wrist. Discover craftsmanship redefined.",
-            "Every second counts. Own the watch that stops time.",
-            "Luxury you can feel. Message us to make it yours today.",
+            "Own a home in New Cairo. 0% down payment, 8 years installments.",
+            "Your dream villa is waiting — limited units in Palm Hills.",
+            "Last phase. Prices rising soon. Reserve your unit today.",
         ],
         "headlines": [
-            "Luxury Redefined",
-            "Own Your Moment",
-            "Timeless Elegance",
+            "Live in New Cairo",
+            "Limited Units Left",
+            "0% Down Payment",
         ],
-        "cta": "Send Message",
-        "visual_prompt": (
-            "A close-up of a gold luxury watch on a marble surface, soft studio lighting, "
-            "elegant and aspirational mood, high-end product photography style."
-        ),
+        "cta": "Sign Up",
+        "visual_prompt": "should be stripped for real estate",
     }
+
+    photo = tmp_path / "unit.jpg"
+    photo.write_bytes(b"UNIT")
 
     state = {
         "campaign_plan": {
-            "product_type": "luxury_watch",
-            "objective": "MESSAGES",
+            "product_type": "Real Estate",
+            "objective": "LEADS",
             "tone": "aspirational",
             "platform": "instagram",
+            "language": "en",
         },
         "budget": 500.0,
-        "goal": "get WhatsApp leads",
-        # AI image mode (no source photo) → exercises the generate_ad_images path
-        "image_mode": "enhance_with_ai",
+        "goal": "generate leads",
+        "image_paths": [str(photo)],
     }
 
-    with patch("AutoMarkAi.backend.nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "gemini")):
-        with patch(
-            "AutoMarkAi.backend.nodes.creative.generate_ad_images",
-            return_value=["b64_img_1", "b64_img_2", "b64_img_3"],
-        ):
-            result = creative_node(state)
+    with patch("AutoMarkAi.backend.nodes.creative.call_llm", return_value=(json.dumps(mock_creative), "groq")):
+        result = creative_node(state)
 
     assert "creative_output" in result
     assert len(result["creative_output"]["copies"]) == 3
     assert len(result["creative_output"]["headlines"]) == 3
-    assert result["creative_output"]["cta"] == "Send Message"
-    assert result["llm_used"]["creative"] == "gemini"
-    assert result["creative_output"]["generated_images"] == ["b64_img_1", "b64_img_2", "b64_img_3"]
+    assert result["creative_output"]["cta"] == "Sign Up"
+    assert result["llm_used"]["creative"] == "groq"
+    # Real estate uses the agency's actual photo, never AI images.
+    assert result["creative_output"]["generated_images"] == [base64.b64encode(b"UNIT").decode("utf-8")]
+    assert "visual_prompt" not in result["creative_output"]
 
 
 # ---------------------------------------------------------------------------

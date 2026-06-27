@@ -56,7 +56,7 @@ def test_strategy_node_produces_finalized_plan():
     }
 
     with patch.dict(os.environ, {"ENABLE_WEB_SEARCH": "false"}):
-        with patch("nodes.strategy.call_llm", return_value=(json.dumps(_MOCK_STRATEGY), "groq")):
+        with patch("AutoMarkAi.backend.nodes.strategy.call_llm", return_value=(json.dumps(_MOCK_STRATEGY), "groq")):
             result = strategy_node(state)
 
     strat = result["strategy_output"]
@@ -77,7 +77,7 @@ def test_strategy_node_graceful_on_llm_failure():
     from AutoMarkAi.backend.nodes.strategy import strategy_node
 
     with patch.dict(os.environ, {"ENABLE_WEB_SEARCH": "false"}):
-        with patch("nodes.strategy.call_llm", return_value=("not json", "groq")):
+        with patch("AutoMarkAi.backend.nodes.strategy.call_llm", return_value=("not json", "groq")):
             result = strategy_node({"campaign_plan": {"language": "en"}, "goal": "x", "budget": 100})
 
     assert result["strategy_output"] == {}
@@ -164,10 +164,14 @@ def test_merge_overrides_audience_with_persona():
 
     bundle = merge_node(state)["campaign_bundle"]
     audience = bundle["media"]["audience"]
-    assert audience["genders"] == ["female"]
-    assert audience["age_min"] == 16 and audience["age_max"] == 26
+    # HOUSING compliance hard-overrides persona age/gender (CHANGE 5).
+    assert audience["genders"] == ["all"]
+    assert audience["age_min"] == 18 and audience["age_max"] == 65
+    # Non-restricted persona signals still flow through.
     assert audience["interests"] == ["beauty", "fragrance"]
     assert audience["locations"] == ["EG"]  # filled from persona when media had none
-    # strategy section is folded into the bundle
+    # campaign declares the HOUSING special ad category
+    assert bundle["campaign"]["special_ad_categories"] == ["HOUSING"]
+    # strategy section is folded into the bundle (raw persona preserved)
     assert bundle["strategy"]["target_persona"]["gender"] == "female"
     assert bundle["strategy"]["rationale"] == "young women"
