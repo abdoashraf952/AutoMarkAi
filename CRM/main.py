@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from app.db import close_pool, init_db
-from app.graph.orchestrator import build_graph
+from app.graph.orchestrator import compiled_graph  # import triggers graph compilation
 from app.api import messenger, facebook_comments, vapi
 
 logger = structlog.get_logger(__name__)
@@ -33,8 +33,7 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("crm.startup.begin")
     await init_db()
-    build_graph()
-    logger.info("crm.startup.complete")
+    logger.info("crm.startup.complete", graph_nodes=len(compiled_graph.nodes))
     yield
     logger.info("crm.shutdown.begin")
     await close_pool()
@@ -55,9 +54,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(messenger.router, prefix="/messenger", tags=["messenger"])
-app.include_router(facebook_comments.router, prefix="/facebook", tags=["facebook"])
-app.include_router(vapi.router, prefix="/vapi", tags=["vapi"])
+app.include_router(messenger.router, tags=["messenger"])
+app.include_router(facebook_comments.router, tags=["facebook"])
+app.include_router(vapi.router, tags=["vapi"])
 
 
 @app.get("/")

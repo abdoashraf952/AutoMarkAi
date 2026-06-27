@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     MAX_CONVERSATION_HISTORY: int = 20
     SUMMARIZATION_MESSAGE_THRESHOLD: int = 20
 
+    # ── Gmail notifications (handoff escalation emails) ───────────────────────
+    GMAIL_SENDER: str = ""        # Gmail address used to send notifications
+    GMAIL_APP_PASSWORD: str = ""  # Google App Password (not your account password)
+    GMAIL_RECIPIENT: str = ""     # Email address that receives handoff alerts
+
     # ── Application ──────────────────────────────────────────────────────────
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000

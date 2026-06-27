@@ -50,13 +50,19 @@ _prompt = PromptTemplate(
     template=_ANSWER_TEMPLATE,
 )
 
-_llm = ChatGoogleGenerativeAI(
-    model=settings.GEMINI_MODEL,
-    temperature=0.1,
-    google_api_key=settings.GEMINI_API_KEY,
-)
+_chain = None  # lazy — built on first call to avoid import-time side effects
 
-_chain = _prompt | _llm | StrOutputParser()
+
+def _get_chain():
+    global _chain
+    if _chain is None:
+        llm = ChatGoogleGenerativeAI(
+            model=settings.GEMINI_MODEL,
+            temperature=0.1,
+            google_api_key=settings.GEMINI_API_KEY,
+        )
+        _chain = _prompt | llm | StrOutputParser()
+    return _chain
 
 NO_INFO_RESPONSE = (
     "I don't have verified information on that right now. "
@@ -105,7 +111,7 @@ async def search_knowledge_base(query: str) -> dict:
     context = "\n\n---\n\n".join(context_parts)
 
     # 4. Generate grounded answer via LCEL chain
-    answer = await _chain.ainvoke({"context": context, "question": query})
+    answer = await _get_chain().ainvoke({"context": context, "question": query})
 
     if not answer or "INSUFFICIENT_CONTEXT" in answer:
         log.info("rag_tool.insufficient_context")

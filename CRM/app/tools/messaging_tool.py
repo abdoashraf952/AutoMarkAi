@@ -76,12 +76,21 @@ async def _send_messenger_reply(message: UnifiedMessage, text: str) -> dict:
 @_retry_on_failure()
 async def _send_facebook_comment_reply(message: UnifiedMessage, text: str) -> dict:
     from app.api.facebook_comments import facebook_comments_adapter
+    from app.api.messenger import messenger_adapter
 
     comment_id = message.metadata.get("comment_id", "")
     if not comment_id:
         logger.warning("messaging_tool.missing_comment_id", user_id=message.user_id)
         return {"success": False, "error": "Missing comment_id"}
 
+    # Reply publicly in the comment thread
     result = await facebook_comments_adapter.reply_to_comment(comment_id, text)
     logger.info("messaging_tool.fb_comment_reply_sent", user_id=message.user_id, success=result.get("success"))
+
+    # Also open a private Messenger conversation with the commenter.
+    # Uses the comment_id as recipient — Meta routes this as a private DM.
+    dm_result = await messenger_adapter.send_message_to_commenter(comment_id, text)
+    if not dm_result.get("success"):
+        logger.warning("messaging_tool.commenter_dm_failed", user_id=message.user_id, error=dm_result.get("error"))
+
     return result

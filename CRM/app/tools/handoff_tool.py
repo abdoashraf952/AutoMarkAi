@@ -19,6 +19,7 @@ import structlog
 from langsmith import traceable
 
 from app.memory.postgres_memory import postgres_memory
+from app.services.email_service import send_handoff_email
 from app.services.hubspot_service import hubspot_service
 
 logger = structlog.get_logger(__name__)
@@ -63,6 +64,15 @@ async def escalate_to_human(
 
     escalation_id = await postgres_memory.create_escalation(
         user_id=user_id, reason=reason, priority=priority, hubspot_note_id=note_id
+    )
+
+    await send_handoff_email(
+        user_id=user_id,
+        reason=reason,
+        priority=priority,
+        lead=lead,
+        escalation_id=escalation_id,
+        notes=notes,
     )
 
     log.info("handoff_tool.escalated", escalation_id=escalation_id, note_id=note_id)

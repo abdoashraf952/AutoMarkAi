@@ -175,6 +175,32 @@ class MessengerAdapter:
             logger.error("messenger.voice_reply_error", error=str(exc))
             return {"success": False, "error": str(exc)}
 
+    async def send_message_to_commenter(self, comment_id: str, text: str) -> dict:
+        """
+        Send a private Messenger DM to someone who commented on a Page post.
+        Meta allows using {"comment_id": ...} as the recipient, which opens a
+        private thread in the commenter's Messenger inbox.
+        Requires pages_messaging permission on the Page access token.
+        """
+        payload = {
+            "recipient": {"comment_id": comment_id},
+            "message": {"text": text[:2000]},
+            "messaging_type": "RESPONSE",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(SEND_API_URL, json=payload, headers=_messenger_headers())
+                resp.raise_for_status()
+            body = resp.json()
+            logger.info("messenger.commenter_dm_sent", comment_id=comment_id)
+            return {"success": True, "message_id": body.get("message_id")}
+        except httpx.HTTPStatusError as exc:
+            logger.error("messenger.commenter_dm_error", status=exc.response.status_code, body=exc.response.text[:300])
+            return {"success": False, "error": exc.response.text[:200]}
+        except Exception as exc:
+            logger.error("messenger.commenter_dm_error", error=str(exc))
+            return {"success": False, "error": str(exc)}
+
     async def send_typing_indicator(self, recipient_id: str) -> None:
         payload = {"recipient": {"id": recipient_id}, "sender_action": "typing_on"}
         try:
