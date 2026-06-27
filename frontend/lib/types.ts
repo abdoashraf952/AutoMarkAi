@@ -8,7 +8,24 @@ export type BackendStage =
   | "questions"
   | "photo_select"
   | "text_review"
+  | "approval"   // Phase 1: Approval Gateway gate (plan / creative / money / launch)
   | "done";
+
+// ---- Approval Gateway (Phase 1) ---------------------------------- //
+
+/** Three-tier approval mode controlling how often the user is interrupted. */
+export type ApprovalMode = "full_manual" | "guided" | "autopilot";
+
+/** Gate types that flow through request_approval(). */
+export type ApprovalGateType = "creative" | "plan" | "money" | "launch" | "schedule";
+
+/** Payload of an "approval" stage interrupt. */
+export interface ApprovalItem {
+  stage: "approval";
+  type: ApprovalGateType;
+  description: string;
+  payload?: unknown;
+}
 
 export type MarketingType = "real_estate";
 export type Language = "en" | "ar";
@@ -46,6 +63,10 @@ export interface StageResponse {
 /** _safe_data payloads — images are stripped to placeholder strings. */
 export interface InterruptData {
   stage?: BackendStage;
+  // approval gate (Phase 1)
+  type?: ApprovalGateType;
+  description?: string;
+  payload?: unknown;
   // campaign_target (the one fixed question — ranked multiple choice)
   options?: TargetOption[] | QuestionOption[];
   // questions (real estate interview — one at a time)
@@ -77,6 +98,7 @@ export interface SetupData {
   budget: number;
   language: Language;
   imageFiles: File[]; // required — at least one real unit photo
+  approvalMode?: ApprovalMode;
 }
 
 export interface PhotoSelectBody {

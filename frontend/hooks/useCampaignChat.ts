@@ -7,6 +7,7 @@ import { toDataUrl } from "@/lib/api";
 import { CopyKey, t } from "@/lib/copy";
 import { openStream, StreamHandle } from "@/lib/sse";
 import type {
+  ApprovalMode,
   AssetType,
   CampaignBundle,
   InterruptData,
@@ -21,6 +22,7 @@ import type {
 // ------------------------------------------------------------------ //
 export type ChatPhase =
   | "language"
+  | "mode"            // Phase 1: approval-mode selector (after language, before photos)
   | "image"
   | "file_uploads"
   | "budget"
@@ -30,6 +32,7 @@ export type ChatPhase =
   | "building"
   | "photo_select"
   | "text_review"
+  | "approval_queue"  // Phase 1: Approval Gateway — waiting for user decision
   | "done"
   | "publishing"
   | "published"
@@ -96,8 +99,13 @@ export function useCampaignChat() {
   const [loading, setLoading] = useState<LoadingState>({ active: false, kind: "analyze", caption: "" });
   const [error, setError] = useState<string | null>(null);
 
+  // Phase 1: approval mode — "guided" is the recommended default for new users.
+  const [approvalMode, setApprovalModeState] = useState<ApprovalMode>("guided");
+
   // setup collection
-  const setupRef = useRef<Partial<{ budget: number; imageFiles: File[] }>>({});
+  const setupRef = useRef<Partial<{ budget: number; imageFiles: File[]; approvalMode: ApprovalMode }>>({
+    approvalMode: "guided",
+  });
 
   // campaign-target (the one fixed question — AI-ranked options)
   const [targetOptions, setTargetOptions] = useState<TargetOption[]>([]);
@@ -162,6 +170,14 @@ export function useCampaignChat() {
     async (resp: StageResponse) => {
       const sid = sessionRef.current!;
       const stage = resp.stage;
+
+      if (stage === "approval") {
+        // Phase 1: Approval Gateway — show the pending item and wait for user action.
+        stopLoading();
+        botText(tr("approvalQueueTitle"));
+        setPhase("approval_queue");
+        return;
+      }
 
       if (stage === "photo_select") {
         const imgs = await api.getImages(sid);
@@ -229,11 +245,24 @@ export function useCampaignChat() {
       setLang(l);
       userText(l === "ar" ? "العربية (مصري)" : "English");
       setTimeout(() => {
-        botText(t(l, "askUnitPhotos"));
-        setPhase("image");
+        botText(t(l, "askApprovalMode"));
+        setPhase("mode");
       }, 250);
     },
     [botText, userText]
+  );
+
+  const setApprovalMode = useCallback(
+    (mode: ApprovalMode, label: string) => {
+      setApprovalModeState(mode);
+      setupRef.current.approvalMode = mode;
+      userText(label);
+      setTimeout(() => {
+        botText(t(lang, "askUnitPhotos"));
+        setPhase("image");
+      }, 250);
+    },
+    [botText, lang, userText]
   );
 
   // Multiple unit photos uploaded. Create the session now so client assets can
@@ -307,15 +336,23 @@ export function useCampaignChat() {
         budget: s.budget,
         language: lang,
         imageFiles: s.imageFiles,
+        approvalMode: s.approvalMode ?? "full_manual",
       });
       stopLoading();
-      setTargetOptions((resp.data.options as TargetOption[]) ?? []);
-      botText(tr("askTarget"));
-      setPhase("campaign_target");
+      if (resp.stage === "campaign_target") {
+        // full_manual: user picks the campaign goal
+        setTargetOptions((resp.data.options as TargetOption[]) ?? []);
+        botText(tr("askTarget"));
+        setPhase("campaign_target");
+      } else {
+        // guided / autopilot: goal was auto-picked, jump straight to interview
+        botText(tr("questionsIntro"));
+        await handleQuestionsOrStage(resp);
+      }
     } catch (e) {
       fail(e);
     }
-  }, [botText, fail, lang, startLoading, stopLoading, tr]);
+  }, [botText, fail, handleQuestionsOrStage, lang, startLoading, stopLoading, tr]);
 
   const setBudget = useCallback(
     (n: number) => {
@@ -407,6 +444,33 @@ export function useCampaignChat() {
   );
 
   // ---------------------------------------------------------------- //
+  // Approval Gateway — resolve a pending approval gate               //
+  // ---------------------------------------------------------------- //
+  const approveGate = useCallback(async () => {
+    userText(tr("approveBtn"));
+    setPhase("building");
+    startLoading("build", tr("buildingCampaign"));
+    try {
+      const resp = await api.submitAnswer(sessionRef.current!, "approved");
+      await handleStage(resp);
+    } catch (e) {
+      fail(e);
+    }
+  }, [fail, handleStage, startLoading, tr, userText]);
+
+  const rejectGate = useCallback(async (feedback: string) => {
+    userText(feedback || tr("rejectBtn"));
+    setPhase("building");
+    startLoading("build", tr("buildingCampaign"));
+    try {
+      const resp = await api.submitAnswer(sessionRef.current!, `rejected: ${feedback}`);
+      await handleStage(resp);
+    } catch (e) {
+      fail(e);
+    }
+  }, [fail, handleStage, startLoading, tr, userText]);
+
+  // ---------------------------------------------------------------- //
   // Publish                                                           //
   // ---------------------------------------------------------------- //
   const doPublish = useCallback(async () => {
@@ -436,7 +500,7 @@ export function useCampaignChat() {
     streamRef.current?.close();
     streamRef.current = null;
     sessionRef.current = null;
-    setupRef.current = {};
+    setupRef.current = { approvalMode: "guided" };
     idRef.current = 0;
     setMessages([]);
     setTargetOptions([]);
@@ -445,6 +509,7 @@ export function useCampaignChat() {
     setPhotoImages([]);
     setError(null);
     setLoading({ active: false, kind: "analyze", caption: "" });
+    setApprovalModeState("guided");
     setLang("en");
     setPhase("language");
     botText(t("en", "greeting"));
@@ -460,6 +525,9 @@ export function useCampaignChat() {
     // setup
     chooseLanguage,
     setImages,
+    // approval mode (Phase 1)
+    approvalMode,
+    setApprovalMode,
     // file uploads
     assetStep: ASSET_STEPS[assetIndex],
     uploadAssetFile,
@@ -476,6 +544,9 @@ export function useCampaignChat() {
     confirmPhotos,
     // text review
     submitText,
+    // approval queue (Phase 1)
+    approveGate,
+    rejectGate,
     // publish
     doPublish,
     restart,

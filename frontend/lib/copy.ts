@@ -76,6 +76,18 @@ const EN = {
   endGoodbye: "Thanks for using **AutoMark AI**! 👋 Your campaign is all set. See you next time.",
   endBtn: "End & exit",
   newCampaign: "New campaign",
+  // Approval mode selector (Phase 1)
+  askApprovalMode: "How hands-on do you want to be? You can change this any time.",
+  fullManualLabel: "Full Manual",
+  fullManualDesc: "I'll confirm every step with you — goal, photos, and copy.",
+  guidedLabel: "Guided (Recommended)",
+  guidedDesc: "I auto-pick your campaign goal; you still approve photos and copy.",
+  autoPilotLabel: "Auto-Pilot",
+  autoPilotDesc: "I run the whole build automatically. You just hit Publish.",
+  // Approval queue (Phase 1)
+  approvalQueueTitle: "Waiting for your approval",
+  approveBtn: "Approve →",
+  rejectBtn: "Edit",
   // generic
   approve: "Approve",
   send: "Send",
@@ -141,6 +153,18 @@ const AR: Dict = {
   endGoodbye: "شكراً لاستخدامك **AutoMark AI**! 👋 حملتك جاهزة. لحد ما نتقابل تاني.",
   endBtn: "إنهاء وخروج",
   newCampaign: "حملة جديدة",
+  // Approval mode selector
+  askApprovalMode: "عايز تتحكم في الموضوع بنسبة قد إيه؟ تقدر تغير ده في أي وقت.",
+  fullManualLabel: "يدوي بالكامل",
+  fullManualDesc: "هأكد معاك كل خطوة — الهدف والصور والنص.",
+  guidedLabel: "موجّه (الأنسب)",
+  guidedDesc: "أنا بختار هدف الحملة تلقائيًا؛ وانت لسه بتوافق على الصور والنص.",
+  autoPilotLabel: "أوتوبايلوت",
+  autoPilotDesc: "أنا بجمّع الحملة كلها تلقائيًا. بس دوّس على نشر.",
+  // Approval queue
+  approvalQueueTitle: "في قرار مستني موافقتك",
+  approveBtn: "موافق →",
+  rejectBtn: "تعديل",
   approve: "موافق",
   send: "إرسال",
   submitAnswer: "إرسال الإجابة",

@@ -61,6 +61,26 @@ class CampaignState(TypedDict, total=False):
     # --- final output ---
     campaign_bundle: dict
 
+    # --- control plane (Phase 0 + 1) ---
+    # campaign_phase tracks which part of the advanced pipeline is active.
+    # Phase 0: only "discovery" and "build" are used.
+    # Phase 4+: "operate" drives the lifecycle/diagnosis loop.
+    campaign_phase: str           # "discovery" | "build" | "operate"
+
+    # approval_mode controls how much the user is interrupted.
+    #   full_manual  — all configurable gates interrupt (reproduces original behaviour)
+    #   guided       — campaign-target auto-picked; creative gates still interrupt
+    #   autopilot    — entire build path auto-approved; only publish requires user action
+    approval_mode: str            # "full_manual" | "guided" | "autopilot"
+
+    # feature_flags is the optionality matrix (all off by default in Phase 1).
+    # e.g. {"image_gen": False, "video_gen": False, "retargeting": False}
+    feature_flags: dict
+
+    # pending_approval holds the current approval-gate item while waiting for
+    # the user (or auto-approval). None / absent when no gate is open.
+    pending_approval: dict
+
     # --- metadata ---
     # Custom reducers so fan-out workers don't overwrite each other's entries
     errors: Annotated[list, operator.add]

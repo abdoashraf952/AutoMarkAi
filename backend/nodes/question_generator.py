@@ -40,6 +40,30 @@ ENABLE_FOLLOW_UPS = os.getenv("ENABLE_FOLLOW_UPS", "true").lower() == "true"
 # Curated fixed interview (CHANGE 3)                                  #
 # ------------------------------------------------------------------ #
 FIXED_QUESTIONS = [
+    # ---------------------------------------------------------------- #
+    # 1. Advertiser type — affects copy voice, trust signals, license  #
+    # ---------------------------------------------------------------- #
+    {
+        "key": "advertiser_type",
+        "data_field": "advertiser_type",
+        "type": "single_select_with_other",
+        "question_en": "Who's advertising — a developer, brokerage, or individual agent?",
+        "question_ar": "بتعلن لصالح مين؟",
+        "options_en": [
+            {"label": "Real Estate Developer", "value": "developer"},
+            {"label": "Brokerage / Sales Office", "value": "brokerage"},
+            {"label": "Individual Agent", "value": "agent"},
+        ],
+        "options_ar": [
+            {"label": "مطور عقاري", "value": "developer"},
+            {"label": "شركة وساطة / مكتب مبيعات", "value": "brokerage"},
+            {"label": "وكيل منفرد", "value": "agent"},
+        ],
+        "recommended": "developer",
+    },
+    # ---------------------------------------------------------------- #
+    # 2. Compound / project name                                       #
+    # ---------------------------------------------------------------- #
     {
         "key": "compound_name",
         "data_field": "compound_name",
@@ -50,6 +74,9 @@ FIXED_QUESTIONS = [
         "options_ar": None,
         "recommended": None,
     },
+    # ---------------------------------------------------------------- #
+    # 3. Location — drives geo-radius targeting                        #
+    # ---------------------------------------------------------------- #
     {
         "key": "location",
         "data_field": "location",
@@ -76,6 +103,9 @@ FIXED_QUESTIONS = [
         ],
         "recommended": "new_cairo",
     },
+    # ---------------------------------------------------------------- #
+    # 4. Unit types — creative + audience framing                      #
+    # ---------------------------------------------------------------- #
     {
         "key": "unit_types",
         "data_field": "unit_types",
@@ -104,6 +134,30 @@ FIXED_QUESTIONS = [
         ],
         "recommended": None,
     },
+    # ---------------------------------------------------------------- #
+    # 5. Delivery status — urgency angle, payment framing              #
+    # ---------------------------------------------------------------- #
+    {
+        "key": "unit_status",
+        "data_field": "unit_status",
+        "type": "single_select_with_other",
+        "question_en": "Are the units off-plan (under construction) or ready to move in?",
+        "question_ar": "الوحدات تحت الإنشاء (أوف بلان) ولا جاهزة للاستلام؟",
+        "options_en": [
+            {"label": "Off-Plan (Under Construction)", "value": "off_plan"},
+            {"label": "Ready to Move In", "value": "ready"},
+            {"label": "Partially Delivered", "value": "partial"},
+        ],
+        "options_ar": [
+            {"label": "تحت الإنشاء (أوف بلان)", "value": "off_plan"},
+            {"label": "جاهزة للاستلام", "value": "ready"},
+            {"label": "تسليم جزئي", "value": "partial"},
+        ],
+        "recommended": "off_plan",
+    },
+    # ---------------------------------------------------------------- #
+    # 6. Starting price — drives price-tier smart defaults             #
+    # ---------------------------------------------------------------- #
     {
         "key": "starting_price",
         "data_field": "starting_price",
@@ -114,16 +168,80 @@ FIXED_QUESTIONS = [
         "options_ar": None,
         "recommended": None,
     },
+    # ---------------------------------------------------------------- #
+    # 7. Payment plan — the #1 hook in Egyptian real estate            #
+    # ---------------------------------------------------------------- #
     {
         "key": "payment_plan",
         "data_field": "payment_plan",
         "type": "free_text",
-        "question_en": "What are the payment terms? (down payment %, installment years, delivery date)",
-        "question_ar": "إيه نظام السداد؟ (مقدم %، سنوات تقسيط، تاريخ الاستلام)",
+        "question_en": "What are the payment terms? (e.g. 10% down, 8 years, delivery 2027)",
+        "question_ar": "إيه نظام السداد؟ (مثلاً: مقدم ١٠٪، تقسيط ٨ سنين، استلام ٢٠٢٧)",
         "options_en": None,
         "options_ar": None,
         "recommended": None,
     },
+    # ---------------------------------------------------------------- #
+    # 8. Amenities — the message-match that does the targeting         #
+    # ---------------------------------------------------------------- #
+    {
+        "key": "amenities",
+        "data_field": "amenities",
+        "type": "multi_select_with_other",
+        "question_en": "What amenities and features does the compound offer?",
+        "question_ar": "إيه الخدمات والمميزات اللي بيوفرها الكمبوند؟",
+        "options_en": [
+            {"label": "Swimming Pool", "value": "pool"},
+            {"label": "Gym & Fitness Club", "value": "gym"},
+            {"label": "Clubhouse", "value": "clubhouse"},
+            {"label": "Gated Security", "value": "security"},
+            {"label": "Underground Parking", "value": "parking"},
+            {"label": "International School", "value": "school"},
+            {"label": "Commercial Area", "value": "commercial"},
+            {"label": "Green Spaces & Landscapes", "value": "green"},
+            {"label": "Kids' Area", "value": "kids"},
+            {"label": "Sports Courts", "value": "sports"},
+        ],
+        "options_ar": [
+            {"label": "حمام سباحة", "value": "pool"},
+            {"label": "جيم ونادي رياضي", "value": "gym"},
+            {"label": "كلوب هاوس", "value": "clubhouse"},
+            {"label": "أمن وبوابات", "value": "security"},
+            {"label": "جراج أرضي", "value": "parking"},
+            {"label": "مدرسة دولية", "value": "school"},
+            {"label": "منطقة تجارية", "value": "commercial"},
+            {"label": "مساحات خضراء وحدائق", "value": "green"},
+            {"label": "منطقة أطفال", "value": "kids"},
+            {"label": "ملاعب رياضية", "value": "sports"},
+        ],
+        "recommended": None,
+    },
+    # ---------------------------------------------------------------- #
+    # 9. Target buyer — angle + tone, cross-checked against price tier #
+    # ---------------------------------------------------------------- #
+    {
+        "key": "target_buyer",
+        "data_field": "target_buyer",
+        "type": "single_select_with_other",
+        "question_en": "Who is the main buyer you're targeting?",
+        "question_ar": "مين المشتري اللي بتستهدفه؟",
+        "options_en": [
+            {"label": "End-User (Owner-Occupier)", "value": "end_user"},
+            {"label": "Real Estate Investor", "value": "investor"},
+            {"label": "First-Time Buyer", "value": "first_time"},
+            {"label": "Upgrader (Moving to Better Home)", "value": "upgrader"},
+        ],
+        "options_ar": [
+            {"label": "مستخدم نهائي (سكن)", "value": "end_user"},
+            {"label": "مستثمر عقاري", "value": "investor"},
+            {"label": "مشتري لأول مرة", "value": "first_time"},
+            {"label": "محسّن السكن (انتقال لأحسن)", "value": "upgrader"},
+        ],
+        "recommended": "end_user",
+    },
+    # ---------------------------------------------------------------- #
+    # 10. Offer / promotion — the lead magnet                          #
+    # ---------------------------------------------------------------- #
     {
         "key": "offer",
         "data_field": "offer",
@@ -150,6 +268,9 @@ FIXED_QUESTIONS = [
         ],
         "recommended": "limited_units",  # may be overridden by price tier
     },
+    # ---------------------------------------------------------------- #
+    # 11. Lead destination — conversion location                       #
+    # ---------------------------------------------------------------- #
     {
         "key": "lead_destination",
         "data_field": "lead_destination",
@@ -170,6 +291,9 @@ FIXED_QUESTIONS = [
         ],
         "recommended": "whatsapp",
     },
+    # ---------------------------------------------------------------- #
+    # 12. Campaign duration — daily budget = total ÷ duration          #
+    # ---------------------------------------------------------------- #
     {
         "key": "campaign_duration",
         "data_field": "campaign_duration",
@@ -248,8 +372,22 @@ def target_gen_node(state: dict) -> dict:
 
 
 def target_ask_node(state: dict) -> dict:
-    """Interrupt so the user picks a campaign target; store it as the goal."""
+    """Interrupt so the user picks a campaign target; store it as the goal.
+
+    In 'guided' or 'autopilot' approval_mode the recommended option is
+    auto-selected without interrupting the user (fewer stops per the DoD).
+    In 'full_manual' mode (the default) it behaves exactly as before.
+    """
     options = list(state.get("campaign_target_options") or [])
+    mode = state.get("approval_mode", "full_manual")
+
+    if mode in ("guided", "autopilot"):
+        # Auto-pick the recommended option; no interrupt needed.
+        rec = next((o for o in options if o.get("recommended")), options[0] if options else None)
+        goal = (rec.get("goal", "") if rec else "").strip()
+        logger.info("target_ask_node: auto-selected goal (approval_mode=%s): %s", mode, goal)
+        return {"goal": goal, "errors": []}
+
     result = interrupt({"stage": "campaign_target", "options": options})
 
     if isinstance(result, dict):

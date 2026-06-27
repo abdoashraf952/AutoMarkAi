@@ -4,6 +4,7 @@
 // ------------------------------------------------------------------ //
 
 import type {
+  ApprovalMode,
   AssetType,
   ImagesResponse,
   PhotoSelectBody,
@@ -63,9 +64,24 @@ export async function uploadAsset(
   return parse(res);
 }
 
+/** Set the approval mode (and optionally feature flags) for the session.
+ *  Call before /start, or at any time to adjust the mode mid-campaign. */
+export async function setMode(
+  sessionId: string,
+  approvalMode: ApprovalMode,
+  featureFlags: Record<string, boolean> = {}
+): Promise<{ ok: boolean; approval_mode: string; feature_flags: Record<string, boolean> }> {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approval_mode: approvalMode, feature_flags: featureFlags }),
+  });
+  return parse(res);
+}
+
 /** Starts the pipeline with the uploaded unit photos — blocks until the first
- *  interrupt (stage "campaign_target"). The campaign goal is chosen later from
- *  the AI-ranked options, not sent here. */
+ *  interrupt. In 'guided' or 'autopilot' mode the first interrupt may be
+ *  'questions' (campaign target is auto-picked), not 'campaign_target'. */
 export async function startSession(
   sessionId: string,
   setup: SetupData
@@ -73,6 +89,7 @@ export async function startSession(
   const form = new FormData();
   form.append("budget", String(setup.budget));
   form.append("language", setup.language);
+  form.append("approval_mode", setup.approvalMode ?? "full_manual");
   for (const file of setup.imageFiles) {
     form.append("images", file, file.name);
   }

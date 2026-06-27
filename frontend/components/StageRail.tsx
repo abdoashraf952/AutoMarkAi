@@ -16,6 +16,7 @@ const STEPS = [
 function phaseToIndex(phase: ChatPhase): number {
   switch (phase) {
     case "language":
+    case "mode":           // Phase 1: approval-mode selector — still "setup"
     case "image":
     case "file_uploads":
     case "budget":
@@ -29,6 +30,7 @@ function phaseToIndex(phase: ChatPhase): number {
     case "photo_select":
       return 3;
     case "text_review":
+    case "approval_queue": // Phase 1: approval gate — shown during/after copy review
       return 4;
     case "done":
     case "publishing":

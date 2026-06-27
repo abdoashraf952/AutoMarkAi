@@ -13,6 +13,8 @@ import TextSend from "./steps/TextSend";
 import CampaignTargetCards from "./steps/CampaignTargetCards";
 import QuestionWithOptions from "./steps/QuestionWithOptions";
 import PhotoSelectGrid from "./steps/PhotoSelectGrid";
+import ApprovalModeCards from "./steps/ApprovalModeCards";
+import ApprovalCard from "./steps/ApprovalCard";
 
 /**
  * The docked, context-aware input area. Renders exactly the control the current
@@ -67,6 +69,14 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
             { value: "ar", label: "العربية (مصري)", emoji: "🇪🇬" },
           ]}
           onPick={(v) => chat.chooseLanguage(v as "en" | "ar")}
+        />
+      );
+
+    case "mode":
+      return (
+        <ApprovalModeCards
+          onPick={chat.setApprovalMode}
+          lang={lang}
         />
       );
 
@@ -142,6 +152,16 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
 
     case "text_review":
       return <p className="text-center text-sm text-white/55">{tr("pickEditHint")}</p>;
+
+    case "approval_queue":
+      return (
+        <ApprovalCard
+          description={undefined}
+          onApprove={chat.approveGate}
+          onReject={chat.rejectGate}
+          lang={lang}
+        />
+      );
 
     case "done":
       return (

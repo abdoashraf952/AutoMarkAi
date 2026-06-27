@@ -72,6 +72,11 @@ async def _new_session() -> str:
         "image_paths": [],
         "logo_path": None,
         "asset_paths": {},
+        # Phase 1: approval mode + feature flags.
+        # None here so /start's form param wins when /mode was never called.
+        # /mode sets this explicitly; /start's effective_mode falls back to its form param.
+        "approval_mode": None,
+        "feature_flags": {},
         "final_state": None,
         "publish_result": None,
         "publish_error": None,
@@ -198,6 +203,11 @@ class PublishBody(BaseModel):
     make_organic_post: bool = True
 
 
+class ModeBody(BaseModel):
+    approval_mode: str = "full_manual"   # "full_manual" | "guided" | "autopilot"
+    feature_flags: dict = {}
+
+
 # ------------------------------------------------------------------ #
 # Endpoints                                                            #
 # ------------------------------------------------------------------ #
@@ -245,11 +255,34 @@ async def upload_asset(
     return {"ok": True, "asset_type": asset_type, "filename": file.filename}
 
 
+@app.post("/session/{session_id}/mode", summary="Set approval mode and feature flags", tags=["Session"])
+async def set_mode(session_id: str, body: ModeBody):
+    """
+    Set the approval mode and feature flags for this session.
+
+    Must be called before /start so the mode is applied from the first node.
+    The mode can also be updated mid-session (takes effect at the next gate).
+
+    approval_mode values:
+      full_manual  — all gates interrupt the user (default; original behaviour)
+      guided       — campaign-target auto-picked; photo & copy gates still interrupt
+      autopilot    — entire build auto-approved; user only acts to publish
+    """
+    _VALID_MODES = ("full_manual", "guided", "autopilot")
+    if body.approval_mode not in _VALID_MODES:
+        raise HTTPException(400, f"Invalid approval_mode. Allowed: {_VALID_MODES}")
+    session = _get_session(session_id)
+    session["approval_mode"] = body.approval_mode
+    session["feature_flags"] = body.feature_flags
+    return {"ok": True, "approval_mode": body.approval_mode, "feature_flags": body.feature_flags}
+
+
 @app.post("/session/{session_id}/start", summary="Start the pipeline with unit photos", tags=["Session"])
 async def start_session(
     session_id: str,
     budget: float = Form(..., description="Total campaign budget in USD"),
     language: str = Form("en", description="'en' for English, 'ar' for Egyptian Arabic"),
+    approval_mode: str = Form("full_manual", description="'full_manual' | 'guided' | 'autopilot'"),
     images: list[UploadFile] = File([], description="Unit photos (jpg/png/webp). At least one required."),
 ):
     """
@@ -278,6 +311,15 @@ async def start_session(
 
     session["image_paths"] = image_paths
 
+    # /start can also set the approval_mode directly (convenience alternative to
+    # calling /mode first).  The session-level value takes precedence if /mode
+    # was already called; otherwise we use what was passed here.
+    _VALID_MODES = ("full_manual", "guided", "autopilot")
+    if approval_mode not in _VALID_MODES:
+        raise HTTPException(400, f"Invalid approval_mode '{approval_mode}'. Allowed: {_VALID_MODES}")
+    effective_mode = session.get("approval_mode") or approval_mode
+    session["approval_mode"] = effective_mode
+
     await _advance(session, {
         "image_paths": image_paths,
         "logo_path": session.get("logo_path") or "",
@@ -286,6 +328,9 @@ async def start_session(
         "language": language,
         "budget": float(budget),
         "goal": "",
+        "approval_mode": effective_mode,
+        "feature_flags": session.get("feature_flags") or {},
+        "campaign_phase": "discovery",
         "errors": [],
         "llm_used": {},
     })
