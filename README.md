@@ -1,133 +1,430 @@
-# AutoMark AI — Unified Platform
+# AutoMark AI — Unified Business Intelligence Platform
 
-Two services sharing one PostgreSQL database:
-
-| Service | Description | URL |
-|---------|-------------|-----|
-| **CRM** | ORCAST AI agent — qualifies leads via Facebook Messenger, Page Comments, and Vapi voice calls. Escalates to humans via Gmail + HubSpot. | http://localhost:8000 |
-| **Analytics** | Data Analytics Assistant — upload CSV/Excel files or connect a SQL source for AI-powered KPI discovery and insights. | http://localhost:8501 |
-
-Both services read and write to a single **PostgreSQL + pgvector** database (`automark`). CRM tables and Analytics tables live side by side with no name conflicts.
+> **AI-powered CRM agent + Data Analytics Assistant sharing one PostgreSQL database.**
+> Built on Google Gemini 2.5 · LangGraph · FastAPI · Streamlit · pgvector
 
 ---
 
-## What the CRM Does
+## Overview
 
-### Channels
-| Channel | Inbound | Outbound |
-|---------|---------|----------|
-| Facebook Messenger | Text, voice (transcribed), images (described) | Text reply or TTS audio |
-| Facebook Page Comments | Top-level post comments | Public comment reply **+ private Messenger DM** |
-| Vapi Voice | Transcribed speech | Text returned to Vapi for TTS |
-
-### AI Pipeline (ORCAST)
-Each inbound message runs through a LangGraph graph:
+AutoMark AI is a unified platform that combines two intelligent systems into a single monorepo with a shared database. It helps businesses automate customer conversations across social media and voice channels while simultaneously analyzing business data for strategic insights.
 
 ```
-Load memory → Classify intent → Route
-  ├── CRM / HubSpot lookup
-  ├── RAG knowledge base search
-  ├── Lead scoring
-  ├── Human escalation
-  └── General conversation
-→ Generate response → Save memory → Deliver reply
+                        ┌─────────────────────────────────────┐
+                        │         AutoMark AI Platform         │
+                        │                                      │
+     Facebook ──────►   │  ┌───────────────┐  ┌────────────┐ │
+     Messenger          │  │  ORCAST CRM   │  │ Analytics  │ │
+     Comments ──────►   │  │   Agent       │  │ Assistant  │ │
+     Vapi Voice ─────►  │  │  Port 8000    │  │ Port 8501  │ │
+                        │  └───────┬───────┘  └─────┬──────┘ │
+                        │          │                 │        │
+                        │          └────────┬────────┘        │
+                        │                  │                  │
+                        │    ┌─────────────▼──────────────┐   │
+                        │    │  PostgreSQL + pgvector      │   │
+                        │    │  Database: automark         │   │
+                        │    │  Port 5432                  │   │
+                        │    └─────────────────────────────┘   │
+                        └─────────────────────────────────────┘
 ```
 
-### Human Handoff
-When the AI escalates a conversation to a human agent, it automatically:
-1. Creates an escalation record in PostgreSQL
-2. Creates a HubSpot note on the contact (if a HubSpot contact ID is known)
-3. Advances the HubSpot deal stage if the lead is qualified
-4. **Sends a Gmail notification email** to your configured address with full lead details
+---
 
-### Facebook Comment → Messenger DM
-When someone comments on a Facebook Page post, the AI:
-1. Replies to the comment publicly in the post thread
-2. **Also sends the reply as a private Messenger DM** to open a direct conversation with the commenter
+## The Two Services
 
-This converts public engagement into private, trackable conversations automatically.
+### 1. ORCAST CRM Agent — `http://localhost:8000`
+
+An AI-powered conversational sales agent that runs 24/7 on three channels simultaneously. It qualifies leads, answers questions from your knowledge base, creates HubSpot contacts, scores leads, and escalates to humans with full context when needed.
+
+**Channels:**
+
+| Channel | What it does |
+|---------|-------------|
+| **Facebook Messenger** | Receives text, voice (transcribed by Gemini), and images (described by Gemini). Replies with text or synthesized TTS audio. |
+| **Facebook Page Comments** | Detects new comments on your Page posts. Replies publicly with a brief acknowledgement, then sends the full AI response as a **private Messenger DM** — converting public engagement into private conversations. |
+| **Vapi Voice (Phone)** | Handles live inbound calls. Vapi manages speech-to-text and text-to-speech; ORCAST handles the conversation logic. |
+
+**When a human agent is needed:**
+- Creates an escalation record in PostgreSQL
+- Adds a note to the HubSpot contact
+- Sends a **Gmail notification email** with the full conversation summary, lead profile, and recent message transcript
+
+### 2. Data Analytics Assistant — `http://localhost:8501`
+
+An AI-powered business intelligence tool that turns raw datasets into executive insights. Upload a CSV or Excel file (or connect a SQL source) and receive KPIs, data-driven insights, visualization recommendations, and a full Markdown executive report — all generated automatically by AI.
+
+**Built-in CRM integration:** The sidebar includes a **"🤝 Analyze CRM Data"** feature that loads leads, conversations, or escalations directly from the shared database and runs the full analysis pipeline on them.
+
+---
+
+## Full Architecture
+
+### System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          AutoMark AI Monorepo                            │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                    ORCAST CRM Agent (FastAPI)                     │   │
+│  │                                                                   │   │
+│  │  Channels           Graph (LangGraph)         Integrations        │   │
+│  │  ─────────          ──────────────────         ────────────        │   │
+│  │  Messenger ──►      memory_load                HubSpot REST        │   │
+│  │  FB Comments ──►    intent_classify    ──►     Gmail SMTP          │   │
+│  │  Vapi Voice ──►     hubspot_node               pgvector RAG        │   │
+│  │                     rag_node                   Gemini LLM          │   │
+│  │                     lead_scoring_node          TTS / STT            │   │
+│  │                     handoff_node                                   │   │
+│  │                     generate_response                              │   │
+│  │                     save_memory                                    │   │
+│  │                     messaging_node                                 │   │
+│  └───────────────────────────┬──────────────────────────────────────┘   │
+│                               │ reads/writes                             │
+│  ┌────────────────────────────▼────────────────────────────────────┐    │
+│  │                  PostgreSQL + pgvector (automark)                 │    │
+│  │                                                                   │    │
+│  │  CRM Tables               Analytics Tables                        │    │
+│  │  ──────────               ─────────────────                       │    │
+│  │  conversations            sessions                                │    │
+│  │  leads                    analyses                                │    │
+│  │  escalations              kpis                                    │    │
+│  │  document_chunks          insights                                │    │
+│  │  (pgvector HNSW)          chat_messages                           │    │
+│  └────────────────────────────▲────────────────────────────────────┘    │
+│                               │ reads/writes                             │
+│  ┌────────────────────────────┴────────────────────────────────────┐    │
+│  │              Data Analytics Assistant (Streamlit)                 │    │
+│  │                                                                   │    │
+│  │  Input Sources          8-Agent Pipeline        Output             │    │
+│  │  ─────────────          ─────────────────        ──────            │    │
+│  │  CSV / Excel ──►        data_loader              6-tab UI          │    │
+│  │  SQL Database ──►       profiling        ──►     KPI cards         │    │
+│  │  CRM Tables ──►         business_analysis        Insights          │    │
+│  │                         kpi_discovery            Charts            │    │
+│  │                         insight_generation       Report (MD)       │    │
+│  │                         visualization            Chat Q&A          │    │
+│  │                         report_generator                           │    │
+│  └──────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### ORCAST Graph Pipeline
+
+Every inbound message (from any channel) runs through this LangGraph StateGraph:
+
+```
+Inbound Message (Messenger / FB Comment / Vapi)
+         │
+         ▼
+   memory_load  ──► loads rolling summary + lead profile from PostgreSQL
+         │
+         ▼
+  [already escalated?]
+         ├── YES ──► already_escalated ──► send "already escalated" reply
+         │
+         └── NO ──► intent_classify  ──► Gemini structured output
+                          │
+                          ▼
+               [route by intent]
+                ├── crm_request    ──► hubspot_node      ─┐
+                ├── knowledge_question ──► rag_node       ─┤
+                ├── lead_qualification ──► lead_scoring   ─┤──► generate_response
+                ├── escalation     ──► handoff_node       ─┤
+                └── general_conversation ─────────────────┘
+                                                           │
+                                                    save_memory
+                                                           │
+                                                    messaging_node
+                                                           │
+                                                    Reply to channel
+```
+
+### Analytics Pipeline
+
+```
+Data Source (CSV / SQL / CRM tables)
+         │
+         ▼
+   data_loader  ──► caches DataFrame in memory
+         │
+         ▼
+   profiling  ──► column stats, quality score, Gemini narrative
+         │
+         ▼
+   business_analysis  ──► Gemini infers domain (Sales, Finance, HR…)
+         │
+         ▼
+   kpi_discovery  ──► Gemini identifies 6–10 KPIs with formulas
+         │
+         ▼
+   insight_generation  ──► Gemini generates 5–8 evidence-backed insights
+         │
+         ▼
+   visualization  ──► recommends chart types + live Plotly previews
+         │
+         ▼
+   report_generator  ──► assembles full Markdown executive report
+         │
+         ▼
+   Streamlit UI (6 tabs: Overview / KPIs / Insights / Charts / Report / Chat)
+```
+
+### RAG (Knowledge Base) Pipeline
+
+```
+knowledge_base/*.md  (company info, services, pricing, FAQ…)
+         │
+         ▼  python -m app.rag.ingest --source ./knowledge_base
+         │
+   Load & chunk (2000 chars, 200 overlap)
+         │
+         ▼
+   Embed with Gemini (models/gemini-embedding-2 → 768 dimensions)
+         │
+         ▼
+   Upsert into document_chunks
+         │   ├── VECTOR(768) HNSW index  (dense cosine search)
+         │   └── TSVECTOR GIN index      (sparse full-text search)
+         │
+         ▼  at query time
+   Hybrid RRF fusion (dense + sparse results)
+         │
+         ▼
+   Gemini reranking
+         │
+         ▼
+   Grounded answer generation (LCEL chain)
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **LLM** | Google Gemini 2.5 Flash (primary) · Gemini 2.5 Pro (fallback) |
+| **Embeddings** | Gemini Embedding 2 (768-dim) via Google AI SDK |
+| **Orchestration** | LangGraph StateGraph (ORCAST graph + Analytics graph) |
+| **CRM Backend** | FastAPI · asyncpg · pgvector |
+| **Analytics Frontend** | Streamlit · Plotly |
+| **Database** | PostgreSQL 16 + pgvector extension |
+| **CRM Integrations** | HubSpot REST v3 · Meta Graph API v19 · Vapi Voice |
+| **Notifications** | Gmail SMTP · Resend API |
+| **Tracing** | LangSmith |
+| **Containerization** | Docker · Docker Compose |
+
+---
+
+## Project Structure
+
+```
+AutoMarkAi/
+│
+├── .env                              ← secrets (gitignored — copy from .env.example)
+├── .env.example                      ← template with all variables documented
+├── config.py                         ← unified pydantic-settings for both services
+├── docker-compose.yml                ← three services: db + crm + analytics
+├── Dockerfile                        ← single image for both services
+├── requirements.txt                  ← combined Python dependencies
+├── start.sh                          ← one-command dev launcher
+│
+├── shared/                           ← cross-project utilities
+│   ├── crm_models.py                 ← SQLAlchemy read-only models for CRM tables
+│   ├── crm_reader.py                 ← load CRM data as DataFrames (used by Analytics)
+│   └── log_visualizer.py             ← parse CRM JSON logs into timeline charts
+│
+├── CRM/                              ← ORCAST CRM Agent
+│   ├── main.py                       ← FastAPI app + lifespan (DB init, graph compile)
+│   ├── config.py                     ← thin redirect → root config.py
+│   ├── scripts/init_db.sql           ← PostgreSQL schema + pgvector indexes
+│   ├── knowledge_base/               ← markdown docs for RAG (edit these!)
+│   └── app/
+│       ├── api/
+│       │   ├── messenger.py          ← Messenger webhook + private DM sender
+│       │   ├── facebook_comments.py  ← Page Comments webhook
+│       │   ├── vapi.py               ← Vapi voice webhook + HMAC verification
+│       │   └── admin.py              ← /admin/db/* database access endpoints
+│       ├── graph/
+│       │   ├── orchestrator.py       ← LangGraph compilation + run_graph()
+│       │   ├── nodes.py              ← all 10 graph node implementations
+│       │   ├── state.py              ← GraphState TypedDict + AgentResponse
+│       │   └── prompts.py            ← system prompt builder + tool schemas
+│       ├── memory/
+│       │   └── postgres_memory.py    ← rolling-summarization PostgreSQL memory
+│       ├── rag/
+│       │   ├── embeddings.py         ← Gemini embeddings (768-dim, SDK-based)
+│       │   ├── vector_store.py       ← pgvector HNSW + GIN full-text operations
+│       │   ├── retriever.py          ← hybrid RRF fusion retriever
+│       │   ├── reranker.py           ← Gemini or cross-encoder reranker
+│       │   └── ingest.py             ← PDF / DOCX / MD / JSON / image ingestion
+│       ├── services/
+│       │   ├── gemini_service.py     ← Gemini text, audio, image, TTS client
+│       │   ├── hubspot_service.py    ← HubSpot REST v3 (contacts, deals, notes)
+│       │   └── email_service.py      ← Resend API + Gmail SMTP escalation emails
+│       └── tools/
+│           ├── handoff_tool.py       ← escalate_to_human → HubSpot + Email
+│           ├── hubspot_tool.py       ← crm_operation dispatcher
+│           ├── lead_scoring_tool.py  ← deterministic 4-factor scoring (0–100)
+│           ├── messaging_tool.py     ← multi-channel reply delivery
+│           └── rag_tool.py           ← search_knowledge_base (lazy LCEL chain)
+│
+└── data-analytics-assistant/         ← Analytics Assistant
+    └── app/
+        ├── agents/                   ← 8 specialized AI agents
+        │   ├── data_loader.py        ← CSV / Excel / SQL / CRM table loading
+        │   ├── profiling.py          ← column statistics + quality scoring
+        │   ├── business_analysis.py  ← domain inference (Sales, Finance, HR…)
+        │   ├── kpi_discovery.py      ← 6–10 KPIs with formulas + values
+        │   ├── insight_generation.py ← 5–8 executive insights with evidence
+        │   ├── visualization.py      ← chart type recommendations
+        │   ├── report_generator.py   ← full Markdown executive report
+        │   └── orchestrator.py       ← conversational follow-up Q&A
+        ├── database/
+        │   ├── connection.py         ← SQLAlchemy lazy engine + session
+        │   ├── models.py             ← ORM models for Analytics tables
+        │   └── repository.py         ← CRUD for analyses, KPIs, insights, chat
+        ├── graph/
+        │   ├── workflow.py           ← LangGraph analytics StateGraph
+        │   └── nodes.py              ← node wrappers + conditional routing
+        ├── schemas/                  ← Pydantic models (AnalyticsState, KPI, Insight…)
+        ├── prompts/                  ← per-agent Gemini prompt templates
+        ├── services/
+        │   ├── gemini_service.py     ← ChatGoogleGenerativeAI wrapper
+        │   ├── dataframe_service.py  ← file loading + schema extraction
+        │   ├── statistics_service.py ← column profiling + quality algorithm
+        │   ├── sql_source_service.py ← read-only SQL → DataFrame (100k row cap)
+        │   └── storage_service.py    ← persistence abstraction layer
+        └── ui/
+            └── streamlit_app.py      ← 6-tab Streamlit UI (1000+ lines)
+```
+
+---
+
+## Shared Database
+
+Both services connect to a single PostgreSQL database (`automark`). No table name conflicts exist.
+
+```
+automark database
+│
+├── CRM tables (created by scripts/init_db.sql)
+│   ├── conversations    user_id PK · source · status · summary · messages JSONB
+│   ├── leads            user_id PK · name · email · phone · lead_score · hubspot_ids
+│   ├── escalations      id PK · user_id FK · reason · priority · status
+│   └── document_chunks  id PK · embedding VECTOR(768) · ts_content TSVECTOR · content
+│
+└── Analytics tables (created by SQLAlchemy on startup)
+    ├── sessions         id PK · user_agent · created_at
+    ├── analyses         id PK · session_id FK · file_name · business_domain
+    ├── kpis             id PK · analysis_id FK · name · formula · priority
+    ├── insights         id PK · analysis_id FK · title · type · recommendation
+    └── chat_messages    id PK · session_id FK · role · content · timestamp
+```
 
 ---
 
 ## Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
-- A [Google Gemini API key](https://aistudio.google.com/app/apikey)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — for PostgreSQL
+- [Google Gemini API key](https://aistudio.google.com/app/apikey) — required
+- Python 3.12
 
 ---
 
-## Quick Start (Docker — recommended)
+## Quick Start
 
-**1. Clone and configure**
+### Docker (everything in one command)
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/abdoashraf952/AutoMarkAi.git
 cd AutoMarkAi
 cp .env.example .env
-```
+# Edit .env — fill in GEMINI_API_KEY at minimum
 
-Open `.env` and fill in at minimum:
-
-```env
-GEMINI_API_KEY=your_key_here
-```
-
-**2. Start all services**
-
-```bash
 docker-compose up --build
 ```
 
-This starts three containers:
-- `automark_db` — PostgreSQL 16 with pgvector extension, port 5432
-- `automark_crm` — FastAPI CRM agent, port 8000
-- `automark_analytics` — Streamlit analytics UI, port 8501
+| Service | URL |
+|---------|-----|
+| Analytics UI | http://localhost:8501 |
+| CRM API | http://localhost:8000 |
+| CRM Docs | http://localhost:8000/docs |
+| DB Admin | http://localhost:8000/admin/db/stats |
 
-The database schema is created automatically on first run.
-
-**3. Open the apps**
-
-- Analytics UI: http://localhost:8501
-- CRM health check: http://localhost:8000/health
-
-**4. Stop everything**
+### Local Development (DB in Docker, apps native)
 
 ```bash
-docker-compose down
+# 1. Start database
+bash start.sh         # or: docker-compose up db -d
 
-# To also delete the database volume (wipes all data):
-docker-compose down -v
+# 2. Terminal 1 — CRM
+cd CRM
+set PYTHONPATH=..     # Windows CMD  (use export PYTHONPATH=.. on Mac/Linux)
+python -m uvicorn main:app --port 8000
+
+# 3. Terminal 2 — Analytics
+streamlit run data-analytics-assistant/app/ui/streamlit_app.py --server.port 8501
+
+# 4. Embed knowledge base (first time only)
+cd CRM
+python -m app.rag.ingest --source ./knowledge_base
 ```
+
+---
+
+## API Reference (CRM)
+
+### Webhook Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/messenger/webhook` | Meta verification handshake |
+| `POST` | `/messenger/webhook` | Messenger messages + Page feed events |
+| `GET` | `/facebook/webhook` | Meta verification handshake |
+| `POST` | `/facebook/webhook` | Facebook Page comment events |
+| `POST` | `/vapi/webhook` | Vapi voice call events |
+
+### Database Admin Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/admin/db/stats` | Row counts + breakdowns for all tables |
+| `GET` | `/admin/db/leads` | All leads (filter: temperature, min_score) |
+| `GET` | `/admin/db/leads/{user_id}` | Single lead profile |
+| `GET` | `/admin/db/conversations` | All conversations (filter: status, source) |
+| `GET` | `/admin/db/conversations/{user_id}` | Full conversation + lead + escalations |
+| `DELETE` | `/admin/db/conversations/{user_id}` | Delete conversation + related data |
+| `GET` | `/admin/db/escalations` | All escalations (filter: status, priority) |
+| `PATCH` | `/admin/db/escalations/{id}/close` | Mark escalation as closed |
+| `GET` | `/admin/db/chunks` | RAG knowledge-base chunks |
+| `DELETE` | `/admin/db/chunks` | Wipe RAG store (re-ingest after) |
+
+Full interactive docs: **http://localhost:8000/docs**
 
 ---
 
 ## Environment Variables
 
-All configuration lives in `.env` at the project root. Copy `.env.example` as a starting point.
+All variables live in `.env` at the project root.
 
-### Shared (both services)
+### Required
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | Full PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/automark` |
-| `GEMINI_API_KEY` | Google Gemini API key — **required** | — |
-| `GEMINI_MODEL` | Primary Gemini model | `gemini-2.5-flash` |
-| `LANGCHAIN_TRACING_V2` | Enable LangSmith tracing | `false` |
-| `LANGCHAIN_API_KEY` | LangSmith API key (optional) | — |
-| `LANGCHAIN_PROJECT` | LangSmith project name | `automark-ai` |
+| Variable | Description |
+|----------|-------------|
+| `GEMINI_API_KEY` | Google AI Studio key |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/automark` |
 
 ### CRM — Channels
 
 | Variable | Description |
 |----------|-------------|
-| `MESSENGER_VERIFY_TOKEN` | Webhook verify token set in your Meta App |
-| `MESSENGER_ACCESS_TOKEN` | Facebook Page access token |
-| `MESSENGER_APP_SECRET` | Meta App secret (for request signing) |
-| `MESSENGER_PAGE_ID` | Your Facebook Page ID |
-| `FB_COMMENTS_VERIFY_TOKEN` | Webhook verify token for Page Comments |
-| `FB_COMMENTS_ACCESS_TOKEN` | Page access token for commenting |
-| `FB_COMMENTS_APP_SECRET` | Meta App secret for Comments app |
-| `FB_COMMENTS_PAGE_ID` | Your Facebook Page ID |
+| `MESSENGER_ACCESS_TOKEN` | Facebook **Page** Access Token (not User token) |
+| `MESSENGER_VERIFY_TOKEN` | Webhook verify token (set in Meta App dashboard) |
+| `MESSENGER_PAGE_ID` | Your Facebook Page numeric ID |
+| `FB_COMMENTS_ACCESS_TOKEN` | Page Access Token for comments |
+| `FB_COMMENTS_VERIFY_TOKEN` | Webhook verify token for comments |
 | `VAPI_API_KEY` | Vapi voice AI API key |
 | `VAPI_WEBHOOK_SECRET` | Vapi webhook HMAC secret |
 
@@ -136,235 +433,73 @@ All configuration lives in `.env` at the project root. Copy `.env.example` as a 
 | Variable | Description |
 |----------|-------------|
 | `HUBSPOT_ACCESS_TOKEN` | HubSpot Private App token |
-| `HUBSPOT_BASE_URL` | HubSpot API base (default: `https://api.hubapi.com`) |
+| `RESEND_API_KEY` | Resend.com API key (HTTPS email, no firewall issues) |
+| `GMAIL_SENDER` | Gmail sender address (SMTP fallback) |
+| `GMAIL_APP_PASSWORD` | Google App Password for SMTP |
+| `GMAIL_RECIPIENT` | Who receives handoff alert emails |
 
-### CRM — Gmail Handoff Emails
+### HubSpot Required Scopes
 
-When a conversation is escalated to a human, a notification email is sent automatically.
+Go to **HubSpot → Settings → Integrations → Private Apps → Scopes**:
 
-| Variable | Description |
-|----------|-------------|
-| `GMAIL_SENDER` | Gmail address used to send notifications (e.g. `bot@gmail.com`) |
-| `GMAIL_APP_PASSWORD` | Google App Password — **not** your regular password. Generate at: Google Account → Security → 2-Step Verification → App passwords |
-| `GMAIL_RECIPIENT` | Email address that receives handoff alerts (e.g. `team@yourcompany.com`) |
+`crm.objects.contacts.read` · `crm.objects.contacts.write` · `crm.objects.deals.read` · `crm.objects.deals.write` · `crm.objects.notes.write`
 
-> If any of the three Gmail variables are empty, the email step is silently skipped. The escalation still saves to the database and HubSpot normally.
+### Meta App Required Permissions
 
-### CRM — AI & RAG
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GEMINI_MODEL_FALLBACK` | Fallback Gemini model | `gemini-2.5-pro` |
-| `GEMINI_EMBEDDING_MODEL` | Embedding model for RAG | `models/text-embedding-004` |
-| `GEMINI_TTS_MODEL` | TTS model for voice replies | `gemini-2.5-flash-preview-tts` |
-| `RERANKER_BACKEND` | `gemini` or `cross-encoder` | `gemini` |
-| `RAG_TOP_K` | Number of RAG chunks to retrieve | `5` |
-| `RAG_SIMILARITY_THRESHOLD` | Minimum similarity score | `0.30` |
-| `KNOWLEDGE_BASE_PATH` | Path to knowledge base documents | `./knowledge_base` |
-| `MAX_CONVERSATION_HISTORY` | Messages kept in memory | `20` |
-| `MAX_AGENT_ITERATIONS` | Max LangGraph steps per turn | `6` |
-
-### Analytics only
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `UPLOAD_DIR` | Directory for uploaded files | `uploads` |
-| `MAX_FILE_SIZE_MB` | Upload size limit | `50` |
-| `SQL_SOURCE_MAX_ROWS` | Row cap for SQL sources | `100000` |
-| `SQL_SOURCE_TIMEOUT_MS` | SQL query timeout | `30000` |
+`pages_messaging` · `pages_read_engagement` · `pages_manage_metadata` · `pages_read_user_content`
 
 ---
 
-## Local Development (without Docker)
+## Knowledge Base
 
-> **The database must be running before either app starts.** The easiest way is to start just the PostgreSQL container from Docker Compose, then run the apps natively.
+The CRM answers product questions using a RAG pipeline over your knowledge base documents.
 
-### Option A — DB in Docker, apps native (recommended for dev)
+**Edit the files in `CRM/knowledge_base/`** with your real business information:
+
+| File | Content |
+|------|---------|
+| `company_overview.md` | Who you are, what you do |
+| `services.md` | Services you offer |
+| `pricing.md` | Plans and pricing |
+| `faq.md` | Common questions and answers |
+| `contact_and_hours.md` | Phone, email, opening hours |
+| `process_and_onboarding.md` | How you work with clients |
+
+After editing, re-embed:
 
 ```bash
-# 1. Start only the database container (stays running in background)
-docker-compose up db -d
-
-# 2. Install Python dependencies (once)
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# 3. Run the CRM (in one terminal, from project root)
 cd CRM
-PYTHONPATH=.. uvicorn main:app --reload --port 8000
-
-# 4. Run the Analytics Assistant (in another terminal, from project root)
-cd ..   # back to AutoMarkAi/
-streamlit run data-analytics-assistant/app/ui/streamlit_app.py --server.port 8501
-
-# 5. Stop the database when done
-docker-compose down db
+python -m app.rag.ingest --source ./knowledge_base --reset
 ```
 
-### Option B — Full local PostgreSQL install
+---
 
-You need PostgreSQL 16 with the pgvector extension installed.
+## Lead Scoring
 
-```bash
-# macOS
-brew install postgresql@16 pgvector
+The CRM automatically scores every lead from 0–100 using a deterministic formula:
 
-# Ubuntu/Debian
-sudo apt install postgresql-16 postgresql-16-pgvector
+| Factor | Weight | Values |
+|--------|--------|--------|
+| Budget | 35% | unknown=0 · low=25 · medium=50 · high=75 · very_high=100 |
+| Authority | 30% | unknown=0 · influencer=33 · recommender=66 · decision_maker=100 |
+| Engagement | 20% | 0–10 scale |
+| Interest | 15% | 0–10 scale |
 
-# Windows (WSL)
-sudo apt install postgresql postgresql-contrib
-# pgvector must be built from source on WSL — see https://github.com/pgvector/pgvector
-```
+**Temperature thresholds:**
+- `cold` — score < 30
+- `warm` — score 30–59
+- `hot` — score 60–79
+- `qualified` — score ≥ 80 → triggers automatic escalation to human
 
-Once PostgreSQL is running:
+---
 
-```bash
-# Create the shared database and schema
-psql -U postgres -c "CREATE DATABASE automark;"
-psql -U postgres -d automark -f CRM/scripts/init_db.sql
-
-# Install deps
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-
-# CRM (terminal 1, from project root)
-cd CRM && PYTHONPATH=.. uvicorn main:app --reload --port 8000
-
-# Analytics (terminal 2, from project root)
-streamlit run data-analytics-assistant/app/ui/streamlit_app.py --server.port 8501
-```
-
-### Troubleshooting
+## Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Connection refused` on CRM start | PostgreSQL not running | Run `docker-compose up db -d` first |
-| `role "postgres" does not exist` | Wrong DB user | Check `DB_USER` in `.env` |
-| `database "automark" does not exist` | Schema not initialised | Run `psql -U postgres -f CRM/scripts/init_db.sql` |
-| Streamlit `ModuleNotFoundError: app` | Wrong working directory | Run streamlit from project root, not from `Data Analytics/` |
-
----
-
-## Project Structure
-
-```
-AutoMarkAi/
-├── .env                              ← fill in secrets (gitignored)
-├── .env.example                      ← template — copy to .env
-├── config.py                         ← unified settings (pydantic-settings)
-├── docker-compose.yml                ← starts db + crm + analytics
-├── Dockerfile                        ← single image for both services
-├── requirements.txt                  ← combined Python dependencies
-├── start.sh                          ← local dev launcher (starts DB first)
-│
-├── shared/                           ← cross-project utilities
-│   ├── crm_models.py                 ← SQLAlchemy models for CRM tables (read-only)
-│   └── crm_reader.py                 ← load CRM tables as DataFrames for Analytics
-│
-├── CRM/                              ← CRM Agent (ORCAST)
-│   ├── __init__.py
-│   ├── main.py                       ← FastAPI entry point
-│   ├── config.py                     ← thin redirect → root config.py
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── messenger.py          ← Messenger webhook + DM sender
-│   │   │   ├── facebook_comments.py  ← Page Comments webhook
-│   │   │   └── vapi.py               ← Vapi voice webhook
-│   │   ├── graph/                    ← LangGraph ORCAST orchestrator
-│   │   ├── tools/
-│   │   │   ├── handoff_tool.py       ← escalation → HubSpot + Gmail
-│   │   │   ├── hubspot_tool.py       ← CRM operations
-│   │   │   ├── lead_scoring_tool.py
-│   │   │   ├── messaging_tool.py     ← reply delivery (comment + DM)
-│   │   │   └── rag_tool.py           ← knowledge base search
-│   │   ├── memory/                   ← rolling-summarization memory
-│   │   ├── rag/                      ← hybrid vector + full-text search
-│   │   └── services/
-│   │       ├── email_service.py      ← Gmail handoff notifications
-│   │       ├── gemini_service.py     ← Gemini multimodal client
-│   │       └── hubspot_service.py    ← HubSpot REST client
-│   ├── knowledge_base/               ← documents ingested for RAG
-│   └── scripts/
-│       └── init_db.sql               ← PostgreSQL schema (pgvector tables)
-│
-└── data-analytics-assistant/         ← Analytics Assistant
-    ├── __init__.py
-    └── app/
-        ├── agents/                   ← 8 AI agents (load, profile, KPI, insight…)
-        ├── database/                 ← SQLAlchemy models + repository
-        ├── graph/                    ← LangGraph analytics workflow
-        ├── schemas/                  ← Pydantic data models
-        ├── services/                 ← Gemini, dataframe, SQL, storage
-        └── ui/
-            └── streamlit_app.py      ← 6-tab Streamlit UI + CRM data loader
-```
-
----
-
-## Shared Database Tables
-
-Both services write to the **`automark`** database. There are no table name conflicts.
-
-**CRM tables** (created by `CRM/scripts/init_db.sql` on first DB start):
-- `conversations` — rolling-summary memory per user
-- `leads` — lead qualification data (name, email, score, temperature)
-- `escalations` — human-handoff records with priority and status
-- `document_chunks` — pgvector RAG store (HNSW cosine + full-text GIN indexes)
-
-**Analytics tables** (created by SQLAlchemy on first Streamlit load):
-- `sessions` — browser sessions
-- `analyses` — uploaded dataset metadata and domain inference
-- `kpis` — discovered KPIs per analysis
-- `insights` — executive insights per analysis
-- `chat_messages` — follow-up conversation history
-
----
-
-## CRM Webhook Setup
-
-Register these endpoints in your Meta App and Vapi dashboards:
-
-| Channel | Method | Path |
-|---------|--------|------|
-| Facebook Messenger | GET + POST | `/messenger/webhook` |
-| Facebook Page Comments | GET + POST | `/facebook/webhook` |
-| Vapi Voice | POST | `/vapi/webhook` |
-
-For local development, expose port 8000 via a tunnel:
-
-```bash
-ngrok http 8000
-# Use the ngrok HTTPS URL as the webhook base in Meta / Vapi dashboards
-```
-
-### Meta App Permissions Required
-
-| Permission | Used for |
-|------------|----------|
-| `pages_messaging` | Send Messenger replies and private DMs to commenters |
-| `pages_read_engagement` | Read Page comments via webhook |
-| `pages_manage_metadata` | Subscribe to webhook events |
-| `pages_read_user_content` | Access comment content |
-
-### Setting Up Gmail App Password
-
-1. Go to your Google Account → **Security**
-2. Enable **2-Step Verification** (required)
-3. Under "How you sign in to Google", click **App passwords**
-4. Create a new app password — select "Mail" and your device
-5. Copy the 16-character code into `GMAIL_APP_PASSWORD` in `.env`
-
-> Use a dedicated Gmail account for sending, not your personal one.
-
----
-
-## Analytics — Supported Data Sources
-
-| Source | Formats |
-|--------|---------|
-| File upload | CSV, XLSX, XLS (up to `MAX_FILE_SIZE_MB`) |
-| SQL database | Any SQLAlchemy-compatible database via connection string |
-
-The Analytics pipeline runs 8 AI agents in sequence: data loading → statistical profiling → business domain inference → KPI discovery → insight generation → visualization recommendations → report generation → conversational follow-up.
+| `Connection refused` on startup | PostgreSQL not running | `docker-compose up db -d` |
+| `404 Not Found` on embedding | Wrong embedding model | Set `GEMINI_EMBEDDING_MODEL=models/gemini-embedding-2` |
+| `403 Forbidden` on HubSpot | Missing scopes | Add required scopes in HubSpot Private App settings |
+| `OAuthException` on Messenger send | User Access Token instead of Page Token | Get Page token via `GET /me/accounts` in Graph API Explorer |
+| `SMTP timeout` on email | Port 587/465 blocked | Set `RESEND_API_KEY` in `.env` for HTTPS delivery |
+| `ModuleNotFoundError: app` on Analytics | Wrong working directory | Run streamlit from the project root, not from `data-analytics-assistant/` |
