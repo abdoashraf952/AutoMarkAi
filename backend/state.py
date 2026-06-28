@@ -81,6 +81,39 @@ class CampaignState(TypedDict, total=False):
     # the user (or auto-approval). None / absent when no gate is open.
     pending_approval: dict
 
+    # --- Phase 2: Compliance ---
+    compliance_result: dict       # {passed, violations, warnings, market}
+
+    # --- Phase 3: Research squad ---
+    audience_plan: dict           # HOUSING-compliant geo/targeting plan
+    competitor_findings: list     # [{hook, offer, format, run_days}] from Ad Library
+    demand_windows: list          # [{label, months, rationale}] seasonal demand
+
+    # --- Phase 4: Operate lifecycle ---
+    # control_mode: which Meta strategy is active.
+    control_mode: str             # "advantage_plus" | "manual"
+    # metric_snapshots: time-series performance readings from Meta.
+    metric_snapshots: list        # [{ts, cpl, qualified_rate, frequency, reach, spend}]
+    # learning_state: whether the ad set is still in Meta's learning phase.
+    learning_state: str           # "learning" | "exited" | "unstable"
+    # decisions_log: every operate action + rationale (audit trail).
+    decisions_log: list           # [{ts, decision, rationale, action_taken}]
+    # lead_records: delivered leads (hashed PII) + quality feedback.
+    lead_records: list            # [{ts, id, quality, crm_status}]
+    # latest_diagnosis: plain-language report from the most recent diagnose cycle.
+    latest_diagnosis: dict        # {summary, cpl, qualified_rate, recommendation}
+
+    # --- Phase 4: Published campaign IDs (set after /publish succeeds) ---
+    # Stored so diagnose_node and act_node can call the Meta Insights/Management APIs.
+    meta_campaign_id: str         # Meta campaign ID returned by create_campaign
+    meta_adset_id: str            # Meta ad set ID returned by create_ad_set
+
+    # --- Phase 5: Memory ---
+    # rolling_summary: compressed conversation / campaign history for this thread.
+    rolling_summary: str
+    # client_memory_ref: key into the long-term per-client JSON store.
+    client_memory_ref: str        # compound_name or client identifier
+
     # --- metadata ---
     # Custom reducers so fan-out workers don't overwrite each other's entries
     errors: Annotated[list, operator.add]

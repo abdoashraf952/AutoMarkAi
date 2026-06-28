@@ -1,4 +1,11 @@
-"""AutoMark AI — FastAPI backend with SSE streaming and human-in-the-loop."""
+"""AutoMark AI — FastAPI backend with SSE streaming and human-in-the-loop.
+
+Phase 0 + 1: supervisor routing, approval modes.
+Phase 2: compliance gate (runs inside the graph; /publish checks compliance_result).
+Phase 3: research squad (runs inside the graph; no new endpoints).
+Phase 4: /report, /operate, /approval endpoints + CampaignScheduler startup.
+Phase 5: client memory injection at /start; /session/{id}/memory endpoint.
+"""
 
 import asyncio
 import json
@@ -6,6 +13,7 @@ import logging
 import os
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -15,13 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-# Make the backend importable regardless of how uvicorn is launched: both
-# `uvicorn AutoMarkAi.backend.api:app` (from the project root) and
-# `uvicorn api:app` (from this backend/ folder) work. The deferred
-# `from AutoMarkAi.backend...` imports below resolve only when the project root
-# (the parent of the AutoMarkAi/ repo) is on sys.path, so ensure it is.
 import sys
-
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -29,15 +31,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="AutoMark AI", version="1.0.0", description="Meta ad campaign generator API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # tighten to your Next.js origin in production
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # ------------------------------------------------------------------ #
@@ -56,7 +49,7 @@ def _get_graph():
 
 
 # ------------------------------------------------------------------ #
-# Session store (in-memory; swap for Redis in production)             #
+# Session store                                                        #
 # ------------------------------------------------------------------ #
 
 _sessions: dict[str, dict] = {}
@@ -72,11 +65,13 @@ async def _new_session() -> str:
         "image_paths": [],
         "logo_path": None,
         "asset_paths": {},
-        # Phase 1: approval mode + feature flags.
-        # None here so /start's form param wins when /mode was never called.
-        # /mode sets this explicitly; /start's effective_mode falls back to its form param.
+        # Phase 1: approval mode
         "approval_mode": None,
         "feature_flags": {},
+        # Phase 4: operate state
+        "operate_enabled": False,
+        # Phase 5: client memory reference
+        "client_memory_ref": None,
         "final_state": None,
         "publish_result": None,
         "publish_error": None,
@@ -106,7 +101,6 @@ def _config(thread_id: str) -> dict:
 
 
 def _safe_data(data: dict) -> dict:
-    """Strip heavy base64 blobs from interrupt_data for JSON responses."""
     if not data:
         return data
     safe = dict(data)
@@ -118,15 +112,48 @@ def _safe_data(data: dict) -> dict:
 
 
 # ------------------------------------------------------------------ #
+# Scheduler (Phase 4)                                                  #
+# ------------------------------------------------------------------ #
+
+_scheduler = None
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    global _scheduler
+    from AutoMarkAi.backend.workers.scheduler import CampaignScheduler
+    _scheduler = CampaignScheduler(_sessions, _get_graph, demo_mode=True)
+    await _scheduler.start()
+    logger.info("Campaign scheduler started")
+    yield
+    await _scheduler.stop()
+    logger.info("Campaign scheduler stopped")
+
+
+# ------------------------------------------------------------------ #
+# App                                                                  #
+# ------------------------------------------------------------------ #
+
+app = FastAPI(
+    title="AutoMark AI",
+    version="2.0.0",
+    description="Real estate Meta ad campaign generator API — advanced multi-agent",
+    lifespan=_lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ------------------------------------------------------------------ #
 # Graph runner                                                         #
 # ------------------------------------------------------------------ #
 
 def _advance_sync(session: dict, input_) -> None:
-    """
-    Run graph.stream() until the next interrupt or completion.
-    Pushes SSE events into the session's asyncio.Queue via the main event loop.
-    Must be called via asyncio.to_thread().
-    """
     graph = _get_graph()
     config = _config(session["thread_id"])
     queue: asyncio.Queue = session["event_queue"]
@@ -145,9 +172,21 @@ def _advance_sync(session: dict, input_) -> None:
             continue
 
         seen = session["_seen"]
-        if chunk.get("questions") and "questions" not in seen:
-            seen.add("questions")
-            push({"event": "progress", "stage": "questions_ready", "message": "Product questions generated"})
+        # Phase 3 research progress events
+        if chunk.get("audience_plan") and "audience_plan" not in seen:
+            seen.add("audience_plan")
+            push({"event": "progress", "stage": "research", "message": "Audience plan ready"})
+        if chunk.get("competitor_findings") and "competitor_findings" not in seen:
+            seen.add("competitor_findings")
+            push({"event": "progress", "stage": "research", "message": "Competitor analysis done"})
+        if chunk.get("demand_windows") and "demand_windows" not in seen:
+            seen.add("demand_windows")
+            push({"event": "progress", "stage": "research", "message": "Demand windows identified"})
+        # Phase 5 memory progress
+        if chunk.get("rolling_summary") and "rolling_summary" not in seen:
+            seen.add("rolling_summary")
+            push({"event": "progress", "stage": "memory", "message": "Session summary ready"})
+        # Standard build events
         if chunk.get("campaign_plan") and "campaign_plan" not in seen:
             seen.add("campaign_plan")
             push({"event": "progress", "stage": "planning", "message": "Campaign plan ready"})
@@ -157,6 +196,15 @@ def _advance_sync(session: dict, input_) -> None:
         if chunk.get("media_output") and "media_output" not in seen:
             seen.add("media_output")
             push({"event": "progress", "stage": "media_buying", "message": "Media buying strategy ready"})
+        # Phase 2 compliance event
+        if chunk.get("compliance_result") and "compliance_result" not in seen:
+            seen.add("compliance_result")
+            cr = chunk["compliance_result"]
+            push({
+                "event": "progress",
+                "stage": "compliance",
+                "message": "HOUSING compliance: " + ("passed ✓" if cr.get("passed") else "violations found"),
+            })
         if chunk.get("campaign_bundle") and "campaign_bundle" not in seen:
             seen.add("campaign_bundle")
             push({"event": "progress", "stage": "bundle_ready", "message": "Campaign bundle assembled"})
@@ -184,18 +232,18 @@ async def _advance(session: dict, input_) -> None:
 # ------------------------------------------------------------------ #
 
 class AnswerBody(BaseModel):
-    answer: str  # the answer to the single question currently being asked
+    answer: str
 
 
 class PhotoSelectBody(BaseModel):
-    selected_indices: list[int]  # which uploaded photos to use in the ad
+    selected_indices: list[int]
 
 
 class TextDecisionBody(BaseModel):
-    copy_index: int = 0       # which of the generated copies the user chose
-    headline_index: int = 0   # which of the generated headlines the user chose
-    copy_text: str = ""        # final copy text (manually edited or same as chosen)
-    headline_text: str = ""    # final headline text (manually edited or same as chosen)
+    copy_index: int = 0
+    headline_index: int = 0
+    copy_text: str = ""
+    headline_text: str = ""
 
 
 class PublishBody(BaseModel):
@@ -204,8 +252,13 @@ class PublishBody(BaseModel):
 
 
 class ModeBody(BaseModel):
-    approval_mode: str = "full_manual"   # "full_manual" | "guided" | "autopilot"
+    approval_mode: str = "full_manual"
     feature_flags: dict = {}
+
+
+class ApprovalBody(BaseModel):
+    decision: str = "approved"   # "approved" | "rejected"
+    feedback: str = ""
 
 
 # ------------------------------------------------------------------ #
@@ -214,10 +267,6 @@ class ModeBody(BaseModel):
 
 @app.post("/session", summary="Create a new campaign session", tags=["Session"])
 async def create_session():
-    """
-    Creates a new empty session and returns its ID.
-    Pass session_id to all subsequent requests.
-    """
     sid = await _new_session()
     return {"session_id": sid}
 
@@ -225,17 +274,12 @@ async def create_session():
 _ASSET_TYPES = ("logo", "brochure", "floor_plans", "master_plan", "price_list")
 
 
-@app.post("/session/{session_id}/upload-asset", summary="Upload a client asset (logo/brochure/…)", tags=["Session"])
+@app.post("/session/{session_id}/upload-asset", summary="Upload a client asset", tags=["Session"])
 async def upload_asset(
     session_id: str,
-    asset_type: str = Form(..., description="'logo', 'brochure', 'floor_plans', 'master_plan', or 'price_list'"),
+    asset_type: str = Form(...),
     file: UploadFile = File(...),
 ):
-    """
-    Upload a real estate marketing asset before starting the pipeline (CHANGE 4).
-    The logo is stored separately; everything else goes into asset_paths.
-    `floor_plans` may be uploaded multiple times (accumulated into a list).
-    """
     session = _get_session(session_id)
     if asset_type not in _ASSET_TYPES:
         raise HTTPException(400, f"Unknown asset_type '{asset_type}'. Allowed: {_ASSET_TYPES}")
@@ -257,17 +301,6 @@ async def upload_asset(
 
 @app.post("/session/{session_id}/mode", summary="Set approval mode and feature flags", tags=["Session"])
 async def set_mode(session_id: str, body: ModeBody):
-    """
-    Set the approval mode and feature flags for this session.
-
-    Must be called before /start so the mode is applied from the first node.
-    The mode can also be updated mid-session (takes effect at the next gate).
-
-    approval_mode values:
-      full_manual  — all gates interrupt the user (default; original behaviour)
-      guided       — campaign-target auto-picked; photo & copy gates still interrupt
-      autopilot    — entire build auto-approved; user only acts to publish
-    """
     _VALID_MODES = ("full_manual", "guided", "autopilot")
     if body.approval_mode not in _VALID_MODES:
         raise HTTPException(400, f"Invalid approval_mode. Allowed: {_VALID_MODES}")
@@ -280,22 +313,11 @@ async def set_mode(session_id: str, body: ModeBody):
 @app.post("/session/{session_id}/start", summary="Start the pipeline with unit photos", tags=["Session"])
 async def start_session(
     session_id: str,
-    budget: float = Form(..., description="Total campaign budget in USD"),
-    language: str = Form("en", description="'en' for English, 'ar' for Egyptian Arabic"),
-    approval_mode: str = Form("full_manual", description="'full_manual' | 'guided' | 'autopilot'"),
-    images: list[UploadFile] = File([], description="Unit photos (jpg/png/webp). At least one required."),
+    budget: float = Form(...),
+    language: str = Form("en"),
+    approval_mode: str = Form("full_manual"),
+    images: list[UploadFile] = File([]),
 ):
-    """
-    Starts the LangGraph real estate pipeline. The user uploads MULTIPLE unit
-    photos (at least one — real estate ads must show the actual units). The
-    marketing type is always 'real_estate'.
-
-    The campaign goal is chosen by the user from the AI-ranked campaign-target
-    options (the first interrupt, stage 'campaign_target').
-
-    Blocks until the graph produces its first interrupt.
-    Returns: current stage ('campaign_target') + the ranked options.
-    """
     session = _get_session(session_id)
 
     image_paths: list[str] = []
@@ -311,26 +333,34 @@ async def start_session(
 
     session["image_paths"] = image_paths
 
-    # /start can also set the approval_mode directly (convenience alternative to
-    # calling /mode first).  The session-level value takes precedence if /mode
-    # was already called; otherwise we use what was passed here.
     _VALID_MODES = ("full_manual", "guided", "autopilot")
     if approval_mode not in _VALID_MODES:
         raise HTTPException(400, f"Invalid approval_mode '{approval_mode}'. Allowed: {_VALID_MODES}")
     effective_mode = session.get("approval_mode") or approval_mode
     session["approval_mode"] = effective_mode
 
+    # Phase 5: inject client memory if already known
+    client_ref = session.get("client_memory_ref") or ""
+    client_memory_context = ""
+    if client_ref:
+        from AutoMarkAi.backend.memory.client_store import build_context_snippet, recall
+        mem = recall(client_ref)
+        client_memory_context = build_context_snippet(mem, language)
+
     await _advance(session, {
         "image_paths": image_paths,
         "logo_path": session.get("logo_path") or "",
         "asset_paths": session.get("asset_paths") or {},
-        "marketing_type": "real_estate",  # hardcoded — no longer user-selectable
+        "marketing_type": "real_estate",
         "language": language,
         "budget": float(budget),
         "goal": "",
         "approval_mode": effective_mode,
         "feature_flags": session.get("feature_flags") or {},
         "campaign_phase": "discovery",
+        "client_memory_ref": client_ref,
+        "rolling_summary": client_memory_context,
+        "control_mode": "advantage_plus",  # default: Meta AI-first
         "errors": [],
         "llm_used": {},
     })
@@ -339,16 +369,6 @@ async def start_session(
 
 @app.get("/session/{session_id}/stream", summary="SSE stream of pipeline events", tags=["Session"])
 async def stream_events(session_id: str):
-    """
-    Server-Sent Events endpoint. Connect with EventSource in Next.js to receive
-    live progress events as the graph runs.
-
-    Event types:
-      - progress  → intermediate node completion
-      - interrupt → graph paused waiting for human input
-      - done      → pipeline complete
-      - ping      → keepalive (every 25s of inactivity)
-    """
     session = _get_session(session_id)
     queue: asyncio.Queue = session["event_queue"]
 
@@ -367,7 +387,6 @@ async def stream_events(session_id: str):
 
 @app.get("/session/{session_id}/state", summary="Get current stage and interrupt data", tags=["Session"])
 async def get_state(session_id: str):
-    """Returns the current stage and the latest interrupt payload (without base64 images)."""
     s = _get_session(session_id)
     return {
         "session_id": session_id,
@@ -376,21 +395,8 @@ async def get_state(session_id: str):
     }
 
 
-@app.post("/session/{session_id}/answer", summary="Answer the campaign target or a product question", tags=["Human-in-the-loop"])
+@app.post("/session/{session_id}/answer", summary="Answer campaign target or interview question", tags=["Human-in-the-loop"])
 async def submit_answer(session_id: str, body: AnswerBody):
-    """
-    Resume the graph after a 'campaign_target' or 'questions' interrupt.
-
-    - On 'campaign_target': send the chosen option's `goal` text as `answer`.
-      It becomes the campaign goal and the adaptive interview begins.
-    - On 'questions': send the answer to the CURRENT question. The interview is
-      adaptive and dynamically sized — each answer is used to decide whether (and
-      what) to ask next, bounded by MIN_QUESTIONS/MAX_QUESTIONS.
-
-    Body: {"answer": "..."}
-    Returns: next stage ('questions' with the next question, or a later stage when
-             the interview is complete) + the interrupt data.
-    """
     from langgraph.types import Command
     session = _get_session(session_id)
     if session["ui_stage"] not in ("questions", "campaign_target"):
@@ -404,13 +410,6 @@ async def submit_answer(session_id: str, body: AnswerBody):
 
 @app.post("/session/{session_id}/select-photos", summary="Pick which uploaded photos to use", tags=["Human-in-the-loop"])
 async def select_photos(session_id: str, body: PhotoSelectBody):
-    """
-    Resume the graph after the 'photo_select' interrupt by choosing which of the
-    uploaded unit photos to include in the ad (CHANGE 2).
-
-    Body: {"selected_indices": [0, 2, 3]}
-    Returns: next stage ('text_review').
-    """
     from langgraph.types import Command
     session = _get_session(session_id)
     _assert_stage(session, "photo_select")
@@ -420,17 +419,6 @@ async def select_photos(session_id: str, body: PhotoSelectBody):
 
 @app.post("/session/{session_id}/text-decision", summary="Choose & edit the ad copy + headline", tags=["Human-in-the-loop"])
 async def text_decision(session_id: str, body: TextDecisionBody):
-    """
-    Resume the graph after the 'text_review' interrupt.
-
-    The user picks ONE of the generated copies and ONE of the headlines, and may
-    edit either text manually. The chosen (possibly edited) copy/headline become
-    the primary creative used in the campaign.
-
-    Body: {"copy_index": 0, "headline_index": 1,
-           "copy_text": "final copy…", "headline_text": "final headline…"}
-    Returns: stage ('done').
-    """
     from langgraph.types import Command
     session = _get_session(session_id)
     _assert_stage(session, "text_review")
@@ -443,22 +431,48 @@ async def text_decision(session_id: str, body: TextDecisionBody):
     return {"stage": session["ui_stage"], "data": _safe_data(session["interrupt_data"])}
 
 
+@app.post("/session/{session_id}/approval", summary="Resolve an Approval Gateway item", tags=["Human-in-the-loop"])
+async def resolve_approval(session_id: str, body: ApprovalBody):
+    """
+    Resolve an approval-gate interrupt (stage == 'approval').
+
+    Body: {"decision": "approved" | "rejected", "feedback": "optional text"}
+    On rejection, feedback is passed back to the relevant agent for revision.
+    """
+    from langgraph.types import Command
+    session = _get_session(session_id)
+    if session["ui_stage"] != "approval":
+        raise HTTPException(
+            409,
+            f"Stage is '{session['ui_stage']}', expected 'approval'",
+        )
+    await _advance(session, Command(resume={
+        "decision": body.decision,
+        "feedback": body.feedback,
+    }))
+    return {"stage": session["ui_stage"], "data": _safe_data(session["interrupt_data"])}
+
+
 @app.post("/session/{session_id}/publish", summary="Publish campaign to Meta", tags=["Publish"])
 async def publish(session_id: str, body: PublishBody = PublishBody()):
-    """
-    Triggers the Meta publish sequence (requires stage == 'done').
-    Creates a PAUSED sponsored ad and/or an organic page post.
-
-    In META_SIMULATION_MODE=true, both are always simulated regardless of body flags.
-    Returns: {success, simulation_mode, result: {campaign, ad_set, creative, ad, post}, errors}
-    """
     session = _get_session(session_id)
     if session["ui_stage"] != "done":
         raise HTTPException(409, f"Stage is '{session['ui_stage']}', must be 'done' to publish")
 
-    bundle = (session.get("final_state") or {}).get("campaign_bundle")
+    final = session.get("final_state") or {}
+    bundle = final.get("campaign_bundle")
     if not bundle:
         raise HTTPException(400, "No campaign bundle found — pipeline may not have completed")
+
+    # Phase 2: block publish if compliance gate failed
+    compliance = final.get("compliance_result") or {}
+    if compliance and not compliance.get("passed", True):
+        violations = compliance.get("violations", [])
+        raise HTTPException(
+            422,
+            f"Campaign failed HOUSING compliance check. Fix these violations before publishing: "
+            + "; ".join(violations),
+        )
 
     from AutoMarkAi.backend.meta_client import get_meta_client
     load_dotenv(override=True)
@@ -491,15 +505,92 @@ async def publish(session_id: str, body: PublishBody = PublishBody()):
     session["publish_result"] = result or None
     session["publish_error"] = "\n\n".join(errors) if errors else None
 
+    # Phase 4: after successful publish, enable operate loop
+    if result and not errors:
+        session["operate_enabled"] = True
+
+        # Store campaign / ad-set IDs into the graph state so diagnose_node
+        # and act_node can call the Meta Insights / Management APIs on resume.
+        campaign_id = (result.get("campaign") or {}).get("id", "")
+        adset_id = (result.get("ad_set") or {}).get("id", "")
+        if campaign_id or adset_id:
+            graph = _get_graph()
+            cfg = _config(session["thread_id"])
+            await asyncio.to_thread(
+                graph.update_state,
+                cfg,
+                {
+                    "meta_campaign_id": campaign_id,
+                    "meta_adset_id": adset_id,
+                    "campaign_phase": "operate",
+                    "control_mode": "advantage_plus",
+                },
+            )
+
+        # Persist session summary to long-term memory (Phase 5)
+        client_ref = final.get("client_memory_ref") or ""
+        if client_ref:
+            re_data = final.get("real_estate_data") or {}
+            from AutoMarkAi.backend.memory.client_store import merge as mem_merge
+            await asyncio.to_thread(mem_merge, client_ref, {
+                "compound_name": re_data.get("compound_name", ""),
+                "location": re_data.get("location", ""),
+                "price_tier": (final.get("campaign_plan") or {}).get("price_tier", {}).get("tier", ""),
+                "outcome": "published",
+                "performance_notes": "",
+            })
+
     return {"success": bool(result), "simulation_mode": sim, "result": result, "errors": errors}
+
+
+@app.get("/session/{session_id}/report", summary="Get latest campaign diagnosis and decisions", tags=["Operate"])
+async def get_report(session_id: str):
+    """
+    Phase 4: Returns the latest diagnosis + decisions log in plain language.
+    No jargon in the default view — CPL and rates are available but not foregrounded.
+    """
+    s = _get_session(session_id)
+    final = (s.get("final_state") or {})
+    diagnosis = final.get("latest_diagnosis") or {}
+    decisions = final.get("decisions_log") or []
+    snapshots = final.get("metric_snapshots") or []
+
+    # Plain-language summary for the frontend
+    return {
+        "session_id": session_id,
+        "operate_enabled": s.get("operate_enabled", False),
+        "control_mode": final.get("control_mode", "advantage_plus"),
+        "learning_state": final.get("learning_state", "learning"),
+        "diagnosis": diagnosis,
+        "decisions": decisions[-5:] if decisions else [],  # last 5 decisions
+        "metric_count": len(snapshots),
+        "compliance": final.get("compliance_result") or {},
+    }
+
+
+@app.post("/session/{session_id}/operate", summary="Trigger an immediate operate cycle", tags=["Operate"])
+async def trigger_operate(session_id: str):
+    """
+    Phase 4: Manually trigger one operate cycle (diagnosis → decision → act).
+    Useful for demo purposes — normally the scheduler fires this automatically.
+    """
+    session = _get_session(session_id)
+    if not session.get("operate_enabled") and session["ui_stage"] != "done":
+        raise HTTPException(
+            409,
+            "Campaign must be published (stage=done) before triggering operate cycle",
+        )
+
+    global _scheduler
+    if _scheduler is None:
+        raise HTTPException(503, "Scheduler not running")
+
+    result = await _scheduler.trigger_session(session_id)
+    return result
 
 
 @app.get("/session/{session_id}/result", summary="Get final bundle and publish result", tags=["Publish"])
 async def get_result(session_id: str):
-    """
-    Returns the complete campaign bundle (without base64 images) and publish result.
-    Call after stage == 'done'.
-    """
     s = _get_session(session_id)
     bundle = dict((s.get("final_state") or {}).get("campaign_bundle") or {})
     creative = dict(bundle.get("creative") or {})
@@ -517,11 +608,6 @@ async def get_result(session_id: str):
 
 @app.get("/session/{session_id}/images", summary="Get generated ad images as base64", tags=["Session"])
 async def get_images(session_id: str):
-    """
-    Returns all generated images as base64-encoded strings.
-    Checks interrupt_data first (during image_review), then falls back to the final bundle.
-    Use the index values here when calling /pick-image.
-    """
     s = _get_session(session_id)
     data = s.get("interrupt_data") or {}
     images = data.get("images") or data.get("image_history") or []
@@ -534,12 +620,23 @@ async def get_images(session_id: str):
     }
 
 
+@app.get("/session/{session_id}/memory", summary="Get client long-term memory for this session", tags=["Session"])
+async def get_memory(session_id: str):
+    """
+    Phase 5: Return the stored long-term client memory for this session's client.
+    """
+    s = _get_session(session_id)
+    client_ref = s.get("client_memory_ref") or (s.get("final_state") or {}).get("client_memory_ref") or ""
+    if not client_ref:
+        return {"session_id": session_id, "client_ref": None, "memory": {}}
+
+    from AutoMarkAi.backend.memory.client_store import recall
+    memory = await asyncio.to_thread(recall, client_ref)
+    return {"session_id": session_id, "client_ref": client_ref, "memory": memory}
+
+
 @app.post("/upload-image", summary="Pre-upload a product image", tags=["Utilities"])
 async def upload_image(image: UploadFile = File(...)):
-    """
-    Standalone image upload — useful for pre-uploading before creating a session.
-    Returns a file_id you can reference later. The actual image is saved to a temp file.
-    """
     suffix = Path(image.filename or "image").suffix or ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await image.read())
@@ -551,4 +648,7 @@ async def upload_image(image: UploadFile = File(...)):
 
 @app.get("/health", summary="Health check", tags=["Utilities"])
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "scheduler_running": _scheduler is not None,
+    }

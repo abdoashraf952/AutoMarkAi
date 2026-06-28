@@ -58,28 +58,35 @@ def route_after_text_review(state: dict) -> str:
 
 def supervisor_route(state: dict) -> str:
     """
-    Central routing function.
+    Central routing function (kept for backward-compat and direct invocations).
 
-    Phase 0: mirrors the existing linear topology — acts as a
-    deterministic dispatcher based on campaign_phase so the graph has
-    one well-known entry point for phase transitions.
-
-    Phase 2+: will gate squads through compliance guardrails, manage
-    the operate-loop cadences, and write to the decision log before
-    any Meta write.
+    Phase 0: mirrors the existing linear topology.
+    Phase 4: operates as a true phase dispatcher — see route_operate below.
     """
     phase = state.get("campaign_phase", PHASE_DISCOVERY)
     logger.debug("supervisor_route: campaign_phase=%s", phase)
 
     if phase == PHASE_DISCOVERY:
-        # Handoff to the build path once questions are done is handled
-        # by route_after_gen inside the discovery sub-loop.
         return "target_gen_node"
-
     if phase == PHASE_BUILD:
-        # Post-interview: go straight to orchestrator.
         return "orchestrator_node"
 
-    # PHASE_OPERATE and future phases handled here in Phase 4+.
     logger.warning("supervisor_route: unhandled phase '%s', falling back to merge", phase)
     return "merge_node"
+
+
+def route_operate(state: dict) -> str:
+    """
+    Entry-point router used by set_conditional_entry_point in pipeline_graph.
+
+    Phase 4 (operate): when the scheduler re-invokes the graph with
+    campaign_phase='operate', we skip the full build path and jump
+    straight to the lifecycle diagnosis cycle.
+
+    All other phases (discovery / build) enter the normal build path.
+    """
+    phase = state.get("campaign_phase", PHASE_DISCOVERY)
+    if phase == PHASE_OPERATE:
+        logger.info("route_operate: entering operate lifecycle")
+        return "diagnose_node"
+    return "target_gen_node"

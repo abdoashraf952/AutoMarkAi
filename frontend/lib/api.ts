@@ -6,6 +6,8 @@
 import type {
   ApprovalMode,
   AssetType,
+  CampaignReport,
+  ClientMemory,
   ImagesResponse,
   PhotoSelectBody,
   PublishBody,
@@ -161,6 +163,46 @@ export async function publish(
 export async function getResult(sessionId: string): Promise<ResultResponse> {
   const res = await fetch(`${API_BASE}/session/${sessionId}/result`);
   return parse<ResultResponse>(res);
+}
+
+// ---- Phase 4: Operate loop ---------------------------------------- //
+
+/** Get the latest campaign diagnosis + decisions log. */
+export async function getReport(sessionId: string): Promise<CampaignReport> {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/report`);
+  return parse<CampaignReport>(res);
+}
+
+/** Resolve an Approval Gateway interrupt (stage == 'approval'). */
+export async function resolveApproval(
+  sessionId: string,
+  decision: "approved" | "rejected",
+  feedback = ""
+): Promise<StageResponse> {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/approval`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, feedback }),
+  });
+  return parse<StageResponse>(res);
+}
+
+/** Manually trigger an immediate operate cycle (diagnosis → decision → act). */
+export async function triggerOperate(
+  sessionId: string
+): Promise<{ ok: boolean; session_id: string }> {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/operate`, {
+    method: "POST",
+  });
+  return parse(res);
+}
+
+// ---- Phase 5: Memory ---------------------------------------------- //
+
+/** Get long-term client memory for a session. */
+export async function getMemory(sessionId: string): Promise<{ session_id: string; client_ref: string | null; memory: ClientMemory | Record<string, never> }> {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/memory`);
+  return parse(res);
 }
 
 /** Convenience: build an <img>-ready data URL from a raw base64 string. */

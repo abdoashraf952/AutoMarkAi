@@ -15,6 +15,7 @@ import QuestionWithOptions from "./steps/QuestionWithOptions";
 import PhotoSelectGrid from "./steps/PhotoSelectGrid";
 import ApprovalModeCards from "./steps/ApprovalModeCards";
 import ApprovalCard from "./steps/ApprovalCard";
+import CampaignReportCard from "./steps/CampaignReportCard";
 
 /**
  * The docked, context-aware input area. Renders exactly the control the current
@@ -168,6 +169,17 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
         <button onClick={chat.doPublish} className="btn-primary w-full text-base">
           🚀 {tr("publishBtn")}
         </button>
+      );
+
+    // Phase 4: operate loop — show campaign report after publish
+    case "operate":
+      return (
+        <CampaignReportCard
+          report={chat.campaignReport!}
+          lang={lang}
+          onTriggerOperate={chat.triggerOperate}
+          operating={chat.operateRunning}
+        />
       );
 
     case "published":

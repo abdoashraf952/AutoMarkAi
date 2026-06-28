@@ -392,3 +392,285 @@ def test_request_approval_auto_approves_everything_in_autopilot():
         )
         assert result["decision"] == "approved", f"gate '{gate_type}' should auto-approve"
         assert result["auto"] is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Compliance gate
+# ---------------------------------------------------------------------------
+
+def test_compliance_node_passes_clean_campaign():
+    """compliance_node passes a HOUSING-compliant media_output."""
+    from AutoMarkAi.backend.nodes.compliance import compliance_node
+    state = {
+        "media_output": {
+            "audience": {"age_min": 18, "age_max": 65, "genders": ["all"], "locations": ["EG"]},
+            "special_ad_category": "HOUSING",
+        },
+        "creative_output": {
+            "copies": ["Discover your dream unit today"],
+            "headlines": ["New Cairo | Starting 2.5M"],
+        },
+    }
+    result = compliance_node(state)
+    assert result["compliance_result"]["passed"] is True
+    assert result["compliance_result"]["violations"] == []
+
+
+def test_compliance_node_blocks_demographic_narrowing():
+    """compliance_node catches narrowed age range as HOUSING violation."""
+    from AutoMarkAi.backend.nodes.compliance import compliance_node
+    state = {
+        "media_output": {
+            "audience": {
+                "age_min": 25, "age_max": 45,   # narrowed — not allowed
+                "genders": ["all"],
+                "income_tier": "high",           # blocked field
+            },
+            "special_ad_category": "HOUSING",
+        },
+        "creative_output": {"copies": [], "headlines": []},
+    }
+    result = compliance_node(state)
+    assert result["compliance_result"]["passed"] is False
+    assert any("age_max" in v for v in result["compliance_result"]["violations"])
+    assert any("income_tier" in v for v in result["compliance_result"]["violations"])
+
+
+def test_compliance_node_catches_preference_language():
+    """compliance_node catches 'perfect for families' as a copy violation."""
+    from AutoMarkAi.backend.nodes.compliance import compliance_node
+    state = {
+        "media_output": {
+            "audience": {"age_min": 18, "age_max": 65, "genders": ["all"]},
+            "special_ad_category": "HOUSING",
+        },
+        "creative_output": {
+            "copies": ["This compound is perfect for families looking for space"],
+            "headlines": ["Family living at its best"],
+        },
+    }
+    result = compliance_node(state)
+    assert result["compliance_result"]["passed"] is False
+    assert any("perfect for families" in v for v in result["compliance_result"]["violations"])
+
+
+def test_compliance_node_warns_missing_special_ad_category():
+    """compliance_node adds a violation when special_ad_category is not HOUSING."""
+    from AutoMarkAi.backend.nodes.compliance import compliance_node
+    state = {
+        "media_output": {
+            "audience": {"age_min": 18, "age_max": 65, "genders": ["all"]},
+            # no special_ad_category
+        },
+        "creative_output": {"copies": [], "headlines": []},
+    }
+    result = compliance_node(state)
+    assert result["compliance_result"]["passed"] is False
+    assert any("HOUSING" in v for v in result["compliance_result"]["violations"])
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Research squad
+# ---------------------------------------------------------------------------
+
+def test_audience_node_produces_compliant_plan():
+    """audience_node returns HOUSING-compliant audience plan (no demographic targeting)."""
+    from AutoMarkAi.backend.nodes.research import audience_node
+    state = {
+        "real_estate_data": {
+            "location": "New Cairo",
+            "starting_price": "3,500,000",
+        },
+        "budget": 500.0,
+    }
+    result = audience_node(state)
+    plan = result["audience_plan"]
+    assert plan["age_min"] == 18
+    assert plan["age_max"] == 65
+    assert plan["genders"] == ["all"]
+    assert plan["interests"] == []   # broad delivery — no interest targeting
+    assert "geo" in plan
+    assert plan["geo"]["radius_km"] > 0
+    assert result["errors"] == []
+
+
+def test_audience_node_infers_price_tier():
+    """audience_node populates price_tier and platform_split from price."""
+    from AutoMarkAi.backend.nodes.research import audience_node
+    state = {
+        "real_estate_data": {"location": "6th of October", "starting_price": "1,200,000"},
+    }
+    result = audience_node(state)
+    assert result["audience_plan"]["price_tier"] == "affordable"
+    assert "facebook" in result["audience_plan"]["platform_split"]
+
+
+def test_competitor_node_returns_findings_in_sim_mode():
+    """competitor_node returns synthetic findings in simulation mode."""
+    from AutoMarkAi.backend.nodes.research import competitor_node
+    with patch.dict("os.environ", {"META_SIMULATION_MODE": "true"}):
+        result = competitor_node({})
+    assert len(result["competitor_findings"]) > 0
+    assert "hook" in result["competitor_findings"][0]
+    assert "insight" in result["competitor_findings"][0]
+
+
+def test_trend_node_returns_egypt_demand_windows():
+    """trend_node returns seasonal demand windows for Egypt."""
+    from AutoMarkAi.backend.nodes.research import trend_node
+    result = trend_node({})
+    assert len(result["demand_windows"]) == 1
+    windows = result["demand_windows"][0]
+    assert "seasonal_windows" in windows
+    assert "payday_calendar" in windows
+    assert len(windows["seasonal_windows"]) >= 3
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Policy thresholds + lifecycle decisions
+# ---------------------------------------------------------------------------
+
+def test_thresholds_mid_range_tier():
+    """get_tier_thresholds returns mid_range values."""
+    from AutoMarkAi.backend.policy.thresholds import get_tier_thresholds
+    t = get_tier_thresholds("mid_range")
+    assert t.cpl_target_usd == 8.0
+    assert t.cpl_acceptable_usd == 16.0
+
+
+def test_thresholds_luxury_tier_has_higher_cpl():
+    """Luxury tier has higher CPL thresholds than mid_range."""
+    from AutoMarkAi.backend.policy.thresholds import get_tier_thresholds
+    mid = get_tier_thresholds("mid_range")
+    lux = get_tier_thresholds("luxury")
+    assert lux.cpl_target_usd > mid.cpl_target_usd
+    assert lux.cpl_pause_usd > mid.cpl_pause_usd
+
+
+def test_diagnose_node_generates_synthetic_snapshot_in_sim_mode():
+    """diagnose_node appends a synthetic metric snapshot in sim mode."""
+    with patch.dict("os.environ", {"META_SIMULATION_MODE": "true"}):
+        from AutoMarkAi.backend.nodes import lifecycle
+        import importlib
+        importlib.reload(lifecycle)
+        result = lifecycle.diagnose_node({"budget": 500.0, "metric_snapshots": []})
+    assert len(result["metric_snapshots"]) == 1
+    snap = result["metric_snapshots"][0]
+    assert "cpl" in snap
+    assert "qualified_rate" in snap
+    assert snap["simulated"] is True
+    assert "learning_state" in result
+    assert "latest_diagnosis" in result
+    assert "status" in result["latest_diagnosis"]
+
+
+def test_diagnose_node_determines_learning_state_after_50_leads():
+    """learning_state becomes 'exited' after enough lead events."""
+    from AutoMarkAi.backend.policy.thresholds import LearningState
+    with patch.dict("os.environ", {"META_SIMULATION_MODE": "true"}):
+        from AutoMarkAi.backend.nodes import lifecycle
+        import importlib
+        importlib.reload(lifecycle)
+        # Build 10 snapshots each with 6 leads = 60 total > threshold 50
+        existing = [{"cpl": 10.0, "qualified_rate": 0.3, "frequency": 1.5, "leads": 6, "ts": "t"} for _ in range(10)]
+        result = lifecycle.diagnose_node({"budget": 500.0, "metric_snapshots": existing})
+    assert result["learning_state"] == LearningState.EXITED
+
+
+def test_decision_node_holds_during_learning():
+    """decision_node emits HOLD during learning phase (never act)."""
+    with patch.dict("os.environ", {"META_SIMULATION_MODE": "true"}):
+        from AutoMarkAi.backend.nodes import lifecycle
+        import importlib
+        importlib.reload(lifecycle)
+        state = {
+            "metric_snapshots": [{"cpl": 10.0, "qualified_rate": 0.3, "frequency": 1.0, "leads": 5, "ts": "t"}],
+            "learning_state": "learning",
+            "approval_mode": "autopilot",
+            "control_mode": "advantage_plus",
+            "campaign_bundle": {"real_estate_project": {"price_tier": "mid_range"}},
+            "decisions_log": [],
+        }
+        result = lifecycle.decision_node(state)
+    from AutoMarkAi.backend.policy.thresholds import OperateDecision
+    assert result["_operate_action"] is None  # HOLD produces no action
+    assert any(d["decision"] == OperateDecision.HOLD for d in result["decisions_log"])
+
+
+def test_act_node_executes_in_sim_mode():
+    """act_node marks execution as completed in simulation mode."""
+    with patch.dict("os.environ", {"META_SIMULATION_MODE": "true"}):
+        from AutoMarkAi.backend.nodes import lifecycle
+        import importlib
+        importlib.reload(lifecycle)
+        from AutoMarkAi.backend.policy.thresholds import OperateDecision
+        state = {
+            "_operate_action": OperateDecision.SCALE_UP,
+            "control_mode": "advantage_plus",
+            "decisions_log": [{"ts": "t", "decision": OperateDecision.SCALE_UP, "rationale": "test"}],
+        }
+        result = lifecycle.act_node(state)
+    assert result["decisions_log"][-1]["outcome"]["executed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: route_operate supervisor function
+# ---------------------------------------------------------------------------
+
+def test_route_operate_returns_diagnose_for_operate_phase():
+    """route_operate routes to diagnose_node when campaign_phase=operate."""
+    from AutoMarkAi.backend.nodes.supervisor import route_operate
+    assert route_operate({"campaign_phase": "operate"}) == "diagnose_node"
+
+
+def test_route_operate_returns_target_gen_for_discovery():
+    """route_operate routes to target_gen_node for discovery phase."""
+    from AutoMarkAi.backend.nodes.supervisor import route_operate
+    assert route_operate({"campaign_phase": "discovery"}) == "target_gen_node"
+    assert route_operate({}) == "target_gen_node"
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Memory
+# ---------------------------------------------------------------------------
+
+def test_client_store_recall_returns_empty_for_new_client(tmp_path):
+    """client_store.recall returns empty dict for an unknown client."""
+    import AutoMarkAi.backend.memory.client_store as cs
+    with patch.object(cs, "_STORE_DIR", tmp_path):
+        result = cs.recall("brand_new_client")
+    assert result == {}
+
+
+def test_client_store_merge_and_recall(tmp_path):
+    """client_store.merge persists data; recall retrieves it."""
+    import AutoMarkAi.backend.memory.client_store as cs
+    with patch.object(cs, "_STORE_DIR", tmp_path):
+        cs.merge("sodic_east", {
+            "compound_name": "Sodic East",
+            "location": "New Cairo",
+            "price_tier": "premium",
+            "outcome": "published",
+            "performance_notes": "CPL was strong in September.",
+        })
+        data = cs.recall("sodic_east")
+    assert data["total_sessions"] == 1
+    assert "Sodic East" in data["known_compounds"]
+    assert data["sessions"][0]["location"] == "New Cairo"
+
+
+def test_client_store_build_context_snippet_for_returning_client(tmp_path):
+    """build_context_snippet returns a non-empty string for a known client."""
+    import AutoMarkAi.backend.memory.client_store as cs
+    with patch.object(cs, "_STORE_DIR", tmp_path):
+        cs.merge("ora", {
+            "compound_name": "Zed",
+            "location": "Cairo",
+            "price_tier": "luxury",
+            "outcome": "published",
+            "performance_notes": "Video ads outperformed static.",
+        })
+        mem = cs.recall("ora")
+    snippet = cs.build_context_snippet(mem, language="en")
+    assert "Zed" in snippet
+    assert len(snippet) > 10

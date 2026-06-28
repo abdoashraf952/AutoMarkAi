@@ -10,6 +10,7 @@ import type {
   ApprovalMode,
   AssetType,
   CampaignBundle,
+  CampaignReport,
   InterruptData,
   Language,
   PublishResult,
@@ -36,6 +37,7 @@ export type ChatPhase =
   | "done"
   | "publishing"
   | "published"
+  | "operate"         // Phase 4: campaign is live — showing diagnosis / operate controls
   | "error";
 
 export type LoaderKind = "analyze" | "build" | "image" | "publish";
@@ -99,12 +101,16 @@ export function useCampaignChat() {
   const [loading, setLoading] = useState<LoadingState>({ active: false, kind: "analyze", caption: "" });
   const [error, setError] = useState<string | null>(null);
 
-  // Phase 1: approval mode — "guided" is the recommended default for new users.
-  const [approvalMode, setApprovalModeState] = useState<ApprovalMode>("guided");
+  // Always full_manual — user has full control over every step.
+  const [approvalMode, setApprovalModeState] = useState<ApprovalMode>("full_manual");
 
-  // setup collection
+  // Phase 4: operate loop state
+  const [campaignReport, setCampaignReport] = useState<CampaignReport | null>(null);
+  const [operateRunning, setOperateRunning] = useState(false);
+
+  // setup collection — approval mode is always full_manual
   const setupRef = useRef<Partial<{ budget: number; imageFiles: File[]; approvalMode: ApprovalMode }>>({
-    approvalMode: "guided",
+    approvalMode: "full_manual",
   });
 
   // campaign-target (the one fixed question — AI-ranked options)
@@ -244,9 +250,10 @@ export function useCampaignChat() {
     (l: Language) => {
       setLang(l);
       userText(l === "ar" ? "العربية (مصري)" : "English");
+      setupRef.current.approvalMode = "full_manual";
       setTimeout(() => {
-        botText(t(l, "askApprovalMode"));
-        setPhase("mode");
+        botText(t(l, "askUnitPhotos"));
+        setPhase("image");
       }, 250);
     },
     [botText, userText]
@@ -292,16 +299,16 @@ export function useCampaignChat() {
   );
 
   // file_uploads — advance through ASSET_STEPS; on the last, go to budget.
-  const advanceAsset = useCallback(() => {
-    setAssetIndex((i) => {
-      const next = i + 1;
-      if (next >= ASSET_STEPS.length) {
-        botText(tr("askBudget"));
-        setPhase("budget");
-        return i;
-      }
-      return next;
-    });
+  // NOTE: side effects (botText, setPhase) are intentionally kept OUTSIDE any
+  // setState updater to prevent React 18 StrictMode from calling them twice.
+  const advanceAsset = useCallback((currentIndex: number) => {
+    const next = currentIndex + 1;
+    if (next >= ASSET_STEPS.length) {
+      botText(tr("askBudget"));
+      setPhase("budget");
+    } else {
+      setAssetIndex(next);
+    }
   }, [botText, tr]);
 
   const uploadAssetFile = useCallback(
@@ -314,15 +321,15 @@ export function useCampaignChat() {
         fail(e);
         return;
       }
-      advanceAsset();
+      advanceAsset(assetIndex);
     },
     [advanceAsset, assetIndex, fail, pushMsg]
   );
 
   const skipAsset = useCallback(() => {
     userText(tr("fileSkip"));
-    advanceAsset();
-  }, [advanceAsset, tr, userText]);
+    advanceAsset(assetIndex);
+  }, [advanceAsset, assetIndex, tr, userText]);
 
   // After the budget we kick off the pipeline; the first interrupt is the
   // AI-ranked campaign-target question.
@@ -486,12 +493,45 @@ export function useCampaignChat() {
         publish: { result: res.result, error: res.errors?.join("\n") || null, sim: res.simulation_mode },
       });
       botText(res.simulation_mode ? tr("publishedSim") : tr("publishedLive"));
-      botText(tr("startOver"));
-      setPhase("published");
+
+      // Phase 4: after successful publish, load report and show operate phase
+      if (res.result && sessionRef.current) {
+        try {
+          const report = await api.getReport(sessionRef.current);
+          setCampaignReport(report);
+          botText(tr("operateStatus"));
+          setPhase("operate");
+        } catch {
+          // operate phase optional — fall back to published
+          botText(tr("startOver"));
+          setPhase("published");
+        }
+      } else {
+        botText(tr("startOver"));
+        setPhase("published");
+      }
     } catch (e) {
       fail(e);
     }
   }, [botText, fail, pushMsg, startLoading, stopLoading, tr, userText]);
+
+  // ---------------------------------------------------------------- //
+  // Operate loop — Phase 4                                            //
+  // ---------------------------------------------------------------- //
+  const triggerOperate = useCallback(async () => {
+    if (!sessionRef.current || operateRunning) return;
+    setOperateRunning(true);
+    try {
+      await api.triggerOperate(sessionRef.current);
+      // Refresh report after operate cycle completes
+      const report = await api.getReport(sessionRef.current);
+      setCampaignReport(report);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setOperateRunning(false);
+    }
+  }, [fail, operateRunning]);
 
   // ---------------------------------------------------------------- //
   // Restart                                                           //
@@ -500,7 +540,7 @@ export function useCampaignChat() {
     streamRef.current?.close();
     streamRef.current = null;
     sessionRef.current = null;
-    setupRef.current = { approvalMode: "guided" };
+    setupRef.current = { approvalMode: "full_manual" };
     idRef.current = 0;
     setMessages([]);
     setTargetOptions([]);
@@ -509,7 +549,9 @@ export function useCampaignChat() {
     setPhotoImages([]);
     setError(null);
     setLoading({ active: false, kind: "analyze", caption: "" });
-    setApprovalModeState("guided");
+    setApprovalModeState("full_manual");
+    setCampaignReport(null);
+    setOperateRunning(false);
     setLang("en");
     setPhase("language");
     botText(t("en", "greeting"));
@@ -549,6 +591,10 @@ export function useCampaignChat() {
     rejectGate,
     // publish
     doPublish,
+    // operate loop (Phase 4)
+    campaignReport,
+    operateRunning,
+    triggerOperate,
     restart,
   };
 }

@@ -35,6 +35,7 @@ function phaseToIndex(phase: ChatPhase): number {
     case "done":
     case "publishing":
     case "published":
+    case "operate":    // Phase 4: campaign is live — show step 5 (Launch)
       return 5;
     default:
       return 0;

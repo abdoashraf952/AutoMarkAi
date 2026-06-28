@@ -233,6 +233,39 @@ class MetaClient(ABC):
             {id, name, status, objective, created_time, account_id}
         """
 
+    @abstractmethod
+    def get_insights(self, adset_id: str) -> dict:
+        """
+        Pull performance metrics for an ad set from the Meta Insights API.
+
+        Args:
+            adset_id: The Meta ad set ID.
+
+        Returns:
+            Dict with keys: spend_usd, impressions, reach, frequency, leads,
+            cpl_usd, qualified_rate, actions (raw list).
+        """
+
+    @abstractmethod
+    def pause_adset(self, adset_id: str) -> dict:
+        """Pause an ad set. Returns {id, status}."""
+
+    @abstractmethod
+    def update_adset_budget(self, adset_id: str, multiplier: float) -> dict:
+        """
+        Scale the ad set daily budget by `multiplier` (e.g. 1.25 = +25%).
+
+        Returns {id, old_budget_usd, new_budget_usd}.
+        """
+
+    @abstractmethod
+    def disable_advantage_plus(self, adset_id: str) -> dict:
+        """Switch an ad set from Advantage+ audience to manual targeting. Returns {id}."""
+
+    @abstractmethod
+    def enable_advantage_plus(self, adset_id: str) -> dict:
+        """Switch an ad set back to Advantage+ audience. Returns {id}."""
+
 
 # ---------------------------------------------------------------------------
 # Simulated implementation — no API calls, realistic fake responses
@@ -360,6 +393,39 @@ class SimulatedMetaClient(MetaClient):
         logger.info("SimulatedMetaClient.get_campaign_status → status=%s", result["status"])
         return result
 
+    def get_insights(self, adset_id: str) -> dict:
+        result = {
+            "adset_id": adset_id,
+            "spend_usd": round(random.uniform(10, 50), 2),
+            "impressions": random.randint(500, 5000),
+            "reach": random.randint(400, 4000),
+            "frequency": round(random.uniform(1.0, 2.5), 2),
+            "leads": random.randint(2, 20),
+            "cpl_usd": round(random.uniform(5, 30), 2),
+            "qualified_rate": round(random.uniform(0.10, 0.45), 3),
+            "simulated": True,
+        }
+        logger.info("SimulatedMetaClient.get_insights → leads=%d cpl=%.2f", result["leads"], result["cpl_usd"])
+        return result
+
+    def pause_adset(self, adset_id: str) -> dict:
+        logger.info("SimulatedMetaClient.pause_adset → id=%s", adset_id)
+        return {"id": adset_id, "status": "PAUSED", "simulated": True}
+
+    def update_adset_budget(self, adset_id: str, multiplier: float) -> dict:
+        old_budget = 10.0
+        new_budget = round(old_budget * multiplier, 2)
+        logger.info("SimulatedMetaClient.update_adset_budget → %.2f×%.2f=%.2f", old_budget, multiplier, new_budget)
+        return {"id": adset_id, "old_budget_usd": old_budget, "new_budget_usd": new_budget, "simulated": True}
+
+    def disable_advantage_plus(self, adset_id: str) -> dict:
+        logger.info("SimulatedMetaClient.disable_advantage_plus → id=%s", adset_id)
+        return {"id": adset_id, "advantage_audience": 0, "simulated": True}
+
+    def enable_advantage_plus(self, adset_id: str) -> dict:
+        logger.info("SimulatedMetaClient.enable_advantage_plus → id=%s", adset_id)
+        return {"id": adset_id, "advantage_audience": 1, "simulated": True}
+
 
 # ---------------------------------------------------------------------------
 # Real implementation — uses facebook-business SDK
@@ -408,6 +474,10 @@ class RealMetaClient(MetaClient):
         # when testing with Graph API Explorer tokens.
         FacebookAdsApi.init(self._app_id, None, self._access_token)
         self._account_currency: str = self._fetch_account_currency()
+        # Page operations (post photos, publish feed) require a Page Access Token,
+        # not the User/System token used for the Ads API.  Exchange it here so
+        # all page writes use the correct token with pages_manage_posts scope.
+        self._page_access_token: str = self._fetch_page_access_token()
         logger.info("MetaClient: real mode active — ad_account=%s currency=%s",
                     self._ad_account_id, self._account_currency)
 
@@ -423,6 +493,39 @@ class RealMetaClient(MetaClient):
         except Exception as e:
             logger.warning("MetaClient: could not fetch account currency, defaulting to USD: %s", e)
             return "USD"
+
+    def _fetch_page_access_token(self) -> str:
+        """
+        Exchange the user/system access token for a Page Access Token.
+
+        Page operations (POST /{page}/photos, POST /{page}/feed) require a
+        Page Access Token with pages_manage_posts scope — not the User token
+        used by the Ads API.  This exchange call:
+            GET /{page_id}?fields=access_token&access_token={user_token}
+        returns the page-specific token when the user token has
+        pages_read_engagement or manage_pages scope.
+
+        Falls back to the user token if the exchange fails so that callers
+        always get a usable (if possibly limited) token.
+        """
+        try:
+            resp = requests.get(
+                f"https://graph.facebook.com/v25.0/{self._page_id}",
+                params={"fields": "access_token", "access_token": self._access_token},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                page_token = resp.json().get("access_token")
+                if page_token:
+                    logger.info("MetaClient: page access token obtained for page %s", self._page_id)
+                    return page_token
+            logger.warning(
+                "MetaClient: page token exchange returned %d — falling back to user token. "
+                "Response: %s", resp.status_code, resp.text[:200],
+            )
+        except Exception as e:
+            logger.warning("MetaClient: page token exchange failed (%s) — using user token", e)
+        return self._access_token
 
     def _usd_to_account_subunits(self, usd_amount: float) -> int:
         """
@@ -487,31 +590,52 @@ class RealMetaClient(MetaClient):
 
         media = bundle.get("media", {})
         campaign_data = bundle.get("campaign", {})
+        re_project = bundle.get("real_estate_project", {})
         audience = media.get("audience", {})
+        is_housing = "HOUSING" in (campaign_data.get("special_ad_categories") or [])
         daily_budget_subunits = self._usd_to_account_subunits(media.get("daily_budget_usd", 10))
 
+        # Pick the right optimization goal based on lead destination.
+        # LEAD_GENERATION is only valid for Meta native Instant Form ads.
+        # WhatsApp / phone / landing-page all route through CONVERSATIONS or LINK_CLICKS.
+        lead_dest = re_project.get("lead_destination", "whatsapp").lower()
         raw_opt_goal = media.get("optimization_goal", "CONVERSATIONS")
-        optimization_goal = _normalize_opt_goal(raw_opt_goal)
+        if raw_opt_goal.upper() in ("LEAD_GENERATION", "QUALITY_LEAD"):
+            if lead_dest == "instant_form":
+                optimization_goal = "LEAD_GENERATION"
+            elif lead_dest == "landing_page":
+                optimization_goal = "LINK_CLICKS"
+            else:
+                # whatsapp, phone, default → CONVERSATIONS
+                optimization_goal = "CONVERSATIONS"
+        else:
+            optimization_goal = _normalize_opt_goal(raw_opt_goal)
 
         name = f"Ad Set — {campaign_data.get('platform', 'instagram').title()}"
 
-        # Resolve LLM-generated interest names to real Meta numeric IDs
-        raw_interests = audience.get("interests", [])
-        interests = _resolve_interests(raw_interests, self._access_token)
-
-        raw_locations = audience.get("locations") or ["US"]
+        raw_locations = audience.get("locations") or ["EG"]
         if isinstance(raw_locations, str):
             raw_locations = [raw_locations]
-        targeting = {
+
+        targeting: dict = {
             "age_min": audience.get("age_min", 18),
             "age_max": audience.get("age_max", 65),
             "geo_locations": {"countries": raw_locations},
-            # Meta v25.0+ requires this flag to be explicitly set (0 = use manual targeting)
-            "targeting_automation": {"advantage_audience": 0},
         }
-        # Only include interests if we successfully resolved at least one
-        if interests:
-            targeting["flexible_spec"] = [{"interests": interests}]
+
+        if is_housing:
+            # HOUSING Special Ad Category prohibits interest, behaviour, and
+            # demographic-narrowing targeting. Only geo + age/gender allowed.
+            # Do NOT include flexible_spec, behaviors, or zip/postal targeting.
+            logger.info("create_ad_set: HOUSING category — interests stripped from targeting")
+        else:
+            # Non-HOUSING: resolve LLM-generated interest names to Meta numeric IDs
+            raw_interests = audience.get("interests", [])
+            interests = _resolve_interests(raw_interests, self._access_token)
+            if interests:
+                targeting["flexible_spec"] = [{"interests": interests}]
+            # Manual targeting (no Advantage+ audience)
+            targeting["targeting_automation"] = {"advantage_audience": 0}
 
         # LOWEST_COST_WITH_BID_CAP and COST_CAP require a bid_amount; fall back if missing
         bid_strategy = media.get("bid_strategy", "LOWEST_COST_WITHOUT_CAP").upper()
@@ -644,29 +768,24 @@ class RealMetaClient(MetaClient):
         images = creative_data.get("generated_images", [])
 
         if images:
-            # Upload the generated image directly to the Page's photos
+            # Upload the image to the Page's photo library.
+            # Must use the Page Access Token (pages_manage_posts) — NOT the User token.
             img_bytes = base64.b64decode(images[0])
             url = f"https://graph.facebook.com/v25.0/{self._page_id}/photos"
-            files = {
-                "source": ("image.png", img_bytes, "image/png")
-            }
-            data = {
-                "message": message,
-                "access_token": self._access_token,
-            }
+            files = {"source": ("image.png", img_bytes, "image/png")}
+            data = {"message": message, "access_token": self._page_access_token}
             resp = requests.post(url, data=data, files=files)
-
             if resp.status_code != 200:
                 raise RuntimeError(f"Photo upload failed: {resp.text}")
-
-            result = resp.json()
-            post_id = result.get("post_id") or result.get("id", f"{self._page_id}_{_meta_id()}")
+            body = resp.json()
+            post_id = body.get("post_id") or body.get("id", f"{self._page_id}_{_meta_id()}")
         else:
-            # Text-only fallback
-            from facebook_business.adobjects.page import Page
-            page = Page(self._page_id)
-            result = page.create_feed(params={"message": message})
-            post_id = result.get("id", f"{self._page_id}_{_meta_id()}")
+            # Text-only post — pages_manage_posts replaces the deprecated publish_actions.
+            url = f"https://graph.facebook.com/v25.0/{self._page_id}/feed"
+            resp = requests.post(url, data={"message": message, "access_token": self._page_access_token})
+            if resp.status_code != 200:
+                raise RuntimeError(f"Page feed post failed: {resp.text}")
+            post_id = resp.json().get("id", f"{self._page_id}_{_meta_id()}")
 
         return {
             "id": post_id,
@@ -696,6 +815,103 @@ class RealMetaClient(MetaClient):
             "created_time": result.get("created_time", _meta_now()),
             "account_id": result.get("account_id", f"act_{self._ad_account_id}"),
         }
+
+    # ---- Insights --------------------------------------------------------
+
+    def get_insights(self, adset_id: str) -> dict:
+        """Pull last-7-day performance from the Meta Insights API for one ad set."""
+        from facebook_business.adobjects.adset import AdSet
+
+        adset = AdSet(adset_id)
+        fields = [
+            "spend", "impressions", "reach", "frequency",
+            "actions", "cost_per_action_type",
+        ]
+        params = {"date_preset": "last_7_days", "level": "adset"}
+        try:
+            data = adset.get_insights(fields=fields, params=params)
+            row = data[0] if data else {}
+        except Exception as e:
+            logger.warning("get_insights failed for adset %s: %s", adset_id, e)
+            row = {}
+
+        spend_usd = float(row.get("spend", 0))
+        impressions = int(row.get("impressions", 0))
+        reach = int(row.get("reach", 0))
+        frequency = float(row.get("frequency", 0))
+
+        # Extract lead count from the actions list
+        actions = row.get("actions") or []
+        lead_action_types = {"lead", "onsite_conversion.lead_grouped", "leadgen.other"}
+        leads = sum(
+            int(a.get("value", 0)) for a in actions
+            if a.get("action_type", "") in lead_action_types
+        )
+
+        cpl_usd = round(spend_usd / leads, 2) if leads > 0 else 0.0
+        # qualified_rate is not available from Meta directly — default to 0 until
+        # the CRM webhook starts feeding back quality signals (Phase 6).
+        qualified_rate = 0.0
+
+        logger.info(
+            "RealMetaClient.get_insights adset=%s spend=%.2f leads=%d cpl=%.2f",
+            adset_id, spend_usd, leads, cpl_usd,
+        )
+        return {
+            "adset_id": adset_id,
+            "spend_usd": round(spend_usd, 2),
+            "impressions": impressions,
+            "reach": reach,
+            "frequency": round(frequency, 2),
+            "leads": leads,
+            "cpl_usd": cpl_usd,
+            "qualified_rate": qualified_rate,
+            "simulated": False,
+        }
+
+    # ---- Budget & status mutations ---------------------------------------
+
+    def pause_adset(self, adset_id: str) -> dict:
+        from facebook_business.adobjects.adset import AdSet
+        adset = AdSet(adset_id)
+        adset.api_update(params={"status": AdSet.Status.paused})
+        logger.info("RealMetaClient.pause_adset → id=%s", adset_id)
+        return {"id": adset_id, "status": "PAUSED"}
+
+    def update_adset_budget(self, adset_id: str, multiplier: float) -> dict:
+        from facebook_business.adobjects.adset import AdSet
+        adset = AdSet(adset_id)
+        current = adset.api_get(fields=["daily_budget"])
+        old_subunits = int(current.get("daily_budget", 0))
+        new_subunits = int(old_subunits * multiplier)
+        adset.api_update(params={"daily_budget": new_subunits})
+
+        rate = _USD_TO_CURRENCY_APPROX.get(self._account_currency, 1.0) * 100
+        old_usd = round(old_subunits / rate, 2) if rate else 0.0
+        new_usd = round(new_subunits / rate, 2) if rate else 0.0
+        logger.info(
+            "RealMetaClient.update_adset_budget → id=%s %.2f→%.2f USD (×%.2f)",
+            adset_id, old_usd, new_usd, multiplier,
+        )
+        return {"id": adset_id, "old_budget_usd": old_usd, "new_budget_usd": new_usd}
+
+    def disable_advantage_plus(self, adset_id: str) -> dict:
+        from facebook_business.adobjects.adset import AdSet
+        adset = AdSet(adset_id)
+        adset.api_update(params={
+            "targeting": {"targeting_automation": {"advantage_audience": 0}}
+        })
+        logger.info("RealMetaClient.disable_advantage_plus → id=%s", adset_id)
+        return {"id": adset_id, "advantage_audience": 0}
+
+    def enable_advantage_plus(self, adset_id: str) -> dict:
+        from facebook_business.adobjects.adset import AdSet
+        adset = AdSet(adset_id)
+        adset.api_update(params={
+            "targeting": {"targeting_automation": {"advantage_audience": 1}}
+        })
+        logger.info("RealMetaClient.enable_advantage_plus → id=%s", adset_id)
+        return {"id": adset_id, "advantage_audience": 1}
 
 
 # ---------------------------------------------------------------------------

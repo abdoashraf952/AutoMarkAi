@@ -32,6 +32,18 @@ def media_buying_node(state: dict) -> dict:
             goal=state["goal"],
         )
 
+        # Phase 3: inject audience_plan from the research squad so the LLM
+        # has the geo-radius, platform split, and targeting rationale.
+        audience_plan = state.get("audience_plan")
+        if audience_plan:
+            audience_ctx = (
+                f"\n\nAudience research (from research squad):\n"
+                f"{json.dumps(audience_plan, indent=2, ensure_ascii=False)}\n"
+                f"Use the geo and platform_split from the audience plan above. "
+                f"Do NOT apply demographic narrowing — broad delivery only (HOUSING).\n"
+            )
+            prompt = audience_ctx + prompt
+
         # Align targeting with the Strategist's persona when available. (merge_node
         # also overrides the final audience with the persona as the source of truth.)
         strategy_context = build_strategy_context(state.get("strategy_output"), language)

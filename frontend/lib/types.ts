@@ -9,7 +9,11 @@ export type BackendStage =
   | "photo_select"
   | "text_review"
   | "approval"   // Phase 1: Approval Gateway gate (plan / creative / money / launch)
-  | "done";
+  | "done"
+  | "compliance" // Phase 2: compliance gate result
+  | "research"   // Phase 3: research squad progress
+  | "diagnosis"  // Phase 4: operate loop diagnosis
+  | "operate_decision"; // Phase 4: lifecycle decision
 
 // ---- Approval Gateway (Phase 1) ---------------------------------- //
 
@@ -199,6 +203,102 @@ export interface PublishResult {
   creative?: { id: string };
   ad?: { id: string; status: string };
   post?: { id: string; created_time?: string; message?: string };
+}
+
+// ---- Phase 2: Compliance (Phase 2) -------------------------------- //
+
+export interface ComplianceResult {
+  passed: boolean;
+  violations: string[];
+  warnings: string[];
+  market: string;
+  special_ad_category: string;
+}
+
+// ---- Phase 3: Research (Phase 3) ---------------------------------- //
+
+export interface AudiencePlan {
+  targeting_approach: string;
+  geo: { city: string; radius_km: number; country: string };
+  age_min: number;
+  age_max: number;
+  genders: string[];
+  price_tier: string;
+  platform_split: Record<string, number>;
+  broad_delivery_note: string;
+}
+
+export interface CompetitorFinding {
+  brand: string;
+  hook: string;
+  offer: string;
+  format: string;
+  run_days: number;
+  insight: string;
+}
+
+// ---- Phase 4: Operate loop (Phase 4) ------------------------------ //
+
+export type ControlMode = "advantage_plus" | "manual";
+export type LearningState = "learning" | "exited" | "unstable";
+
+export interface MetricSnapshot {
+  ts: string;
+  cpl: number;
+  qualified_rate: number;
+  frequency: number;
+  leads: number;
+  spend_usd: number;
+  simulated?: boolean;
+}
+
+export interface OperateDiagnosis {
+  ts: string;
+  status: string;  // plain-language status
+  cpl: number;
+  qualified_rate: number;
+  leads_today: number;
+  frequency: number;
+  learning_state: LearningState;
+  simulated?: boolean;
+}
+
+export interface DecisionLogEntry {
+  ts: string;
+  decision: string;
+  rationale: string;
+  learning_state: LearningState;
+  cpl?: number;
+  qualified_rate?: number;
+  outcome?: { executed: boolean; sim: boolean };
+}
+
+export interface CampaignReport {
+  session_id: string;
+  operate_enabled: boolean;
+  control_mode: ControlMode;
+  learning_state: LearningState;
+  diagnosis: OperateDiagnosis;
+  decisions: DecisionLogEntry[];
+  metric_count: number;
+  compliance: ComplianceResult;
+}
+
+// ---- Phase 5: Memory (Phase 5) ------------------------------------ //
+
+export interface ClientMemory {
+  client_id: string;
+  updated_at: string;
+  sessions: Array<{
+    ts: string;
+    compound_name?: string;
+    location?: string;
+    price_tier?: string;
+    outcome?: string;
+    performance_notes?: string;
+  }>;
+  known_compounds: string[];
+  total_sessions: number;
 }
 
 export interface PublishResponse {

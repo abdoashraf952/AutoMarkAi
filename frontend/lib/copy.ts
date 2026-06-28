@@ -88,6 +88,23 @@ const EN = {
   approvalQueueTitle: "Waiting for your approval",
   approveBtn: "Approve →",
   rejectBtn: "Edit",
+  // Phase 2: Compliance
+  compliancePassed: "Campaign passed HOUSING compliance check ✓",
+  complianceFailed: "Compliance issues found — check before publishing",
+  // Phase 3: Research
+  researchingAudience: "Analysing your audience and location…",
+  checkingCompetitors: "Checking competitor ads for insights…",
+  trendWindowsReady: "Optimal launch timing identified",
+  // Phase 4: Operate loop
+  operateTitle: "Campaign is live",
+  operateStatus: "Your campaign is running. Here's the latest.",
+  diagnosisLabel: "Latest status",
+  decisionsLabel: "Recent decisions",
+  triggerOperate: "Run diagnosis now",
+  operateRunning: "Running diagnosis…",
+  learnPhaseNote: "Campaign is still in the learning phase — no actions taken yet.",
+  controlModeAuto: "Running on Meta Advantage+",
+  controlModeManual: "Running on manual optimization",
   // generic
   approve: "Approve",
   send: "Send",
@@ -165,6 +182,23 @@ const AR: Dict = {
   approvalQueueTitle: "في قرار مستني موافقتك",
   approveBtn: "موافق →",
   rejectBtn: "تعديل",
+  // Phase 2: Compliance
+  compliancePassed: "الحملة اجتازت فحص الامتثال لقوانين HOUSING ✓",
+  complianceFailed: "في مشاكل امتثال — راجعها قبل النشر",
+  // Phase 3: Research
+  researchingAudience: "بحلل الجمهور والموقع…",
+  checkingCompetitors: "بشوف إعلانات المنافسين…",
+  trendWindowsReady: "اتحدد أفضل وقت للإطلاق",
+  // Phase 4: Operate loop
+  operateTitle: "الحملة شغالة",
+  operateStatus: "حملتك اتنشرت. ده آخر تحديث.",
+  diagnosisLabel: "آخر تقرير",
+  decisionsLabel: "آخر القرارات",
+  triggerOperate: "اعمل تشخيص دلوقتي",
+  operateRunning: "بعمل التشخيص…",
+  learnPhaseNote: "الحملة لسه في مرحلة التعلم — مفيش إجراءات لحد دلوقتي.",
+  controlModeAuto: "شغال على Advantage+ من ميتا",
+  controlModeManual: "شغال على تحسين يدوي",
   approve: "موافق",
   send: "إرسال",
   submitAnswer: "إرسال الإجابة",

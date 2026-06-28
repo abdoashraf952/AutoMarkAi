@@ -101,7 +101,7 @@ FIXED_QUESTIONS = [
             {"label": "العين السخنة", "value": "ain_sokhna"},
             {"label": "مدينة المستقبل", "value": "mostakbal_city"},
         ],
-        "recommended": "new_cairo",
+        "recommended": None,
     },
     # ---------------------------------------------------------------- #
     # 4. Unit types — creative + audience framing                      #
@@ -153,7 +153,7 @@ FIXED_QUESTIONS = [
             {"label": "جاهزة للاستلام", "value": "ready"},
             {"label": "تسليم جزئي", "value": "partial"},
         ],
-        "recommended": "off_plan",
+        "recommended": None,
     },
     # ---------------------------------------------------------------- #
     # 6. Starting price — drives price-tier smart defaults             #
@@ -266,7 +266,7 @@ FIXED_QUESTIONS = [
             {"label": "وحدات مفروشة", "value": "furnished"},
             {"label": "مفيش عرض حالياً", "value": "no_offer"},
         ],
-        "recommended": "limited_units",  # may be overridden by price tier
+        "recommended": None,
     },
     # ---------------------------------------------------------------- #
     # 11. Lead destination — conversion location                       #
