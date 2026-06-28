@@ -4,19 +4,17 @@ import { motion } from "framer-motion";
 import type { ChatPhase } from "@/hooks/useCampaignChat";
 
 const STEPS = [
-  { key: "setup", label: "Photos & files", emoji: "📸" },
-  { key: "goal", label: "Your goal", emoji: "🎯" },
-  { key: "questions", label: "Compound", emoji: "🏗️" },
-  { key: "photos", label: "Pick photos", emoji: "🖼️" },
-  { key: "words", label: "Ad copy", emoji: "✍️" },
-  { key: "launch", label: "Launch", emoji: "🚀" },
+  { key: "setup",     label: "Photos & files", emoji: "📸" },
+  { key: "goal",      label: "Your goal",      emoji: "🎯" },
+  { key: "questions", label: "Compound",       emoji: "🏗️" },
+  { key: "photos",    label: "Pick photos",    emoji: "🖼️" },
+  { key: "words",     label: "Ad copy",        emoji: "✍️" },
+  { key: "launch",    label: "Launch",         emoji: "🚀" },
 ];
 
-// Map the fine-grained phase to a coarse rail index.
 function phaseToIndex(phase: ChatPhase): number {
   switch (phase) {
     case "language":
-    case "mode":           // Phase 1: approval-mode selector — still "setup"
     case "image":
     case "file_uploads":
     case "budget":
@@ -30,12 +28,10 @@ function phaseToIndex(phase: ChatPhase): number {
     case "photo_select":
       return 3;
     case "text_review":
-    case "approval_queue": // Phase 1: approval gate — shown during/after copy review
       return 4;
     case "done":
     case "publishing":
     case "published":
-    case "operate":    // Phase 4: campaign is live — show step 5 (Launch)
       return 5;
     default:
       return 0;
@@ -48,7 +44,7 @@ export default function StageRail({ phase }: { phase: ChatPhase }) {
   return (
     <div className="mx-auto flex w-full max-w-2xl items-center gap-1.5 px-4">
       {STEPS.map((step, i) => {
-        const done = i < current;
+        const done   = i < current;
         const active = i === current;
         return (
           <div key={step.key} className="flex flex-1 items-center gap-1.5">
@@ -57,14 +53,14 @@ export default function StageRail({ phase }: { phase: ChatPhase }) {
                 animate={{
                   scale: active ? 1.1 : 1,
                   boxShadow: active
-                    ? "0 0 0 1px rgba(99,102,241,0.5), 0 6px 24px -6px rgba(99,102,241,0.8)"
+                    ? "0 0 0 1px rgba(201,168,76,0.55), 0 6px 24px -6px rgba(201,168,76,0.8)"
                     : "0 0 0 0 transparent",
                 }}
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors ${
                   done
                     ? "bg-accent-violet/30 text-white"
                     : active
-                    ? "bg-gradient-to-br from-accent-violet to-accent-cyan text-white"
+                    ? "bg-gradient-to-br from-accent-violet to-accent-cyan text-[#1A1205]"
                     : "bg-white/5 text-white/35"
                 }`}
               >

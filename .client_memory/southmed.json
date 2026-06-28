@@ -1,0 +1,18 @@
+{
+  "client_id": "southmed",
+  "updated_at": "2026-06-28T12:12:27.078683+00:00",
+  "sessions": [
+    {
+      "ts": "2026-06-28T12:12:27.078683+00:00",
+      "compound_name": "southmed",
+      "location": "الساحل الشمالي",
+      "price_tier": "premium",
+      "outcome": "published",
+      "performance_notes": ""
+    }
+  ],
+  "known_compounds": [
+    "southmed"
+  ],
+  "total_sessions": 1
+}

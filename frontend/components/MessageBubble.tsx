@@ -72,7 +72,7 @@ function Content({
         <div
           className={
             isUser
-              ? "rounded-2xl rounded-br-md bg-gradient-to-br from-accent-violet to-[#4f46e5] px-4 py-2.5 text-sm text-white shadow-glow"
+              ? "rounded-2xl rounded-br-md bg-gradient-to-br from-accent-violet to-[#D97706] px-4 py-2.5 text-sm font-medium text-[#1A1205] shadow-glow"
               : "glass rounded-2xl rounded-bl-md px-4 py-2.5 text-sm leading-relaxed text-white/90"
           }
         >

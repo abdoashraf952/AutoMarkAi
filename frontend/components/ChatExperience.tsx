@@ -4,6 +4,7 @@ import { useCampaignChat } from "@/hooks/useCampaignChat";
 import ChatWindow from "@/components/ChatWindow";
 import Composer from "@/components/Composer";
 import StageRail from "@/components/StageRail";
+import { BuildingIcon } from "@/components/Landing";
 
 /** The full chat surface. Mounted only while the campaign is active, so
  *  "End" can unmount it (tearing down the session) and return to the home. */
@@ -14,12 +15,18 @@ export default function ChatExperience({ onEnd }: { onEnd: () => void }) {
     <main className="flex h-[100dvh] flex-col">
       <header className="flex items-center justify-between px-5 py-4">
         <button onClick={onEnd} className="flex items-center gap-2.5" aria-label="Home">
-          <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-accent-violet to-accent-cyan text-lg shadow-glow">
-            ✦
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-2xl shadow-glow"
+            style={{
+              background:
+                "linear-gradient(135deg, #B8860B 0%, #C9A84C 35%, #E8C97A 65%, #D97706 100%)",
+            }}
+          >
+            <BuildingIcon size={20} />
           </div>
           <div className="text-left leading-tight">
             <h1 className="text-sm font-semibold accent-gradient-text">AutoMark AI</h1>
-            <p className="text-[11px] text-white/40">Your real estate campaign assistant</p>
+            <p className="text-[11px] text-white/40">AI-powered real estate campaigns</p>
           </div>
         </button>
         <span className="chip">

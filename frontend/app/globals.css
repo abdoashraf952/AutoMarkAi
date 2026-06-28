@@ -18,7 +18,7 @@ body {
 }
 
 body {
-  background: #070b1a;
+  background: #0A0805;
   color: #e8eaf5;
   font-family: var(--font-geist);
   -webkit-font-smoothing: antialiased;
@@ -62,22 +62,24 @@ body {
     -webkit-backdrop-filter: blur(24px) saturate(160%);
   }
 
+  /* Luxury gold gradient text */
   .accent-gradient-text {
-    background: linear-gradient(100deg, #a5b4fc 0%, #6366f1 42%, #2dd4bf 100%);
+    background: linear-gradient(110deg, #FEF3C7 0%, #E8C97A 30%, #C9A84C 60%, #D97706 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
 
-  /* Glowing primary button */
+  /* Luxury gold button — dark text on gold for premium contrast */
   .btn-primary {
-    @apply relative inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold text-white transition-all duration-200;
-    background: linear-gradient(100deg, #6366f1 0%, #818cf8 50%, #2dd4bf 140%);
-    box-shadow: 0 8px 30px -8px rgba(99, 102, 241, 0.7);
+    @apply relative inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition-all duration-200;
+    background: linear-gradient(110deg, #C9A84C 0%, #E8C97A 55%, #D97706 140%);
+    color: #1A1205;
+    box-shadow: 0 8px 30px -8px rgba(201, 168, 76, 0.65);
   }
   .btn-primary:hover {
     transform: translateY(-1px);
-    box-shadow: 0 12px 40px -8px rgba(99, 102, 241, 0.9);
+    box-shadow: 0 12px 40px -8px rgba(201, 168, 76, 0.9);
   }
   .btn-primary:active {
     transform: translateY(0);
@@ -101,14 +103,15 @@ body {
     @apply w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white placeholder-white/40 outline-none transition-all duration-200;
   }
   .field:focus {
-    border-color: rgba(99, 102, 241, 0.6);
-    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
+    border-color: rgba(201, 168, 76, 0.6);
+    box-shadow: 0 0 0 4px rgba(201, 168, 76, 0.14);
   }
 
-  /* "Recommended" pill used on the campaign-target options */
+  /* "Recommended" pill — gold badge with warm dark text */
   .badge-rec {
-    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink-950;
-    background: linear-gradient(100deg, #fbbf24 0%, #fcd34d 100%);
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide;
+    background: linear-gradient(100deg, #C9A84C 0%, #E8C97A 100%);
+    color: #1A1205;
   }
 }
 
@@ -126,13 +129,13 @@ body {
 /* ----- Custom scrollbar ------------------------------------------- */
 .scroll-area {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(201, 168, 76, 0.22) transparent;
 }
 .scroll-area::-webkit-scrollbar {
   width: 8px;
 }
 .scroll-area::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(201, 168, 76, 0.2);
   border-radius: 99px;
 }
 .scroll-area::-webkit-scrollbar-track {
