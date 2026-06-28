@@ -154,6 +154,9 @@ app.add_middleware(
 # ------------------------------------------------------------------ #
 
 def _advance_sync(session: dict, input_) -> None:
+    from AutoMarkAi.backend.agent_logger import set_thread, log_session_end
+    set_thread(session["thread_id"])
+
     graph = _get_graph()
     config = _config(session["thread_id"])
     queue: asyncio.Queue = session["event_queue"]
@@ -213,6 +216,7 @@ def _advance_sync(session: dict, input_) -> None:
         session["ui_stage"] = "done"
         state_snap = graph.get_state(config)
         session["final_state"] = state_snap.values if state_snap else {}
+        log_session_end(session["thread_id"], "done")
         push({"event": "done", "stage": "done"})
     else:
         data = last_interrupt.value if hasattr(last_interrupt, "value") else last_interrupt
@@ -346,6 +350,15 @@ async def start_session(
         from AutoMarkAi.backend.memory.client_store import build_context_snippet, recall
         mem = recall(client_ref)
         client_memory_context = build_context_snippet(mem, language)
+
+    from AutoMarkAi.backend.agent_logger import log_session_start
+    log_session_start(
+        thread_id=session_id,
+        budget=float(budget),
+        language=language,
+        approval_mode=effective_mode,
+        image_count=len(image_paths),
+    )
 
     await _advance(session, {
         "image_paths": image_paths,

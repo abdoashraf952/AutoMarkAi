@@ -50,6 +50,7 @@ def _build_checkpointer():
     _logger.info("Checkpointer: MemorySaver (in-memory, lost on restart)")
     return MemorySaver()
 
+from AutoMarkAi.backend.agent_logger import wrap_node as _wrap
 from AutoMarkAi.backend.nodes.compliance import compliance_node
 from AutoMarkAi.backend.nodes.creative import creative_node
 from AutoMarkAi.backend.nodes.lifecycle import (
@@ -116,34 +117,35 @@ def get_pipeline_graph():
     """
     builder = StateGraph(CampaignState)
 
-    # ── Discovery squad ────────────────────────────────────────────────
-    builder.add_node("target_gen_node", target_gen_node)
-    builder.add_node("target_ask_node", target_ask_node)
-    builder.add_node("question_gen_node", question_gen_node)
-    builder.add_node("question_ask_node", question_ask_node)
-    builder.add_node("summarizer_node", summarizer_node)        # Phase 5
-
-    # ── Research squad (Phase 3) ───────────────────────────────────────
-    builder.add_node("audience_node", audience_node)
-    builder.add_node("competitor_node", competitor_node)
-    builder.add_node("trend_node", trend_node)
-
-    # ── Plan + Creative + Buying squads ───────────────────────────────
-    builder.add_node("orchestrator_node", orchestrator_node)
-    builder.add_node("strategy_node", strategy_node)
-    builder.add_node("creative_node", creative_node)
-    builder.add_node("media_buying_node", media_buying_node)
-    builder.add_node("photo_select_node", photo_select_node)
-    builder.add_node("text_review_node", text_review_node)
-
-    # ── Merge + Compliance (Phase 2) ──────────────────────────────────
-    builder.add_node("merge_node", merge_node)
-    builder.add_node("compliance_node", compliance_node)
-
-    # ── Operate lifecycle (Phase 4) ───────────────────────────────────
-    builder.add_node("diagnose_node", diagnose_node)
-    builder.add_node("decision_node", decision_node)
-    builder.add_node("act_node", act_node)
+    # ── Register all nodes (each wrapped for agent I/O logging) ──────────
+    _node_map = {
+        # Discovery squad
+        "target_gen_node":   target_gen_node,
+        "target_ask_node":   target_ask_node,
+        "question_gen_node": question_gen_node,
+        "question_ask_node": question_ask_node,
+        "summarizer_node":   summarizer_node,       # Phase 5
+        # Research squad (Phase 3)
+        "audience_node":     audience_node,
+        "competitor_node":   competitor_node,
+        "trend_node":        trend_node,
+        # Plan + Creative + Buying squads
+        "orchestrator_node": orchestrator_node,
+        "strategy_node":     strategy_node,
+        "creative_node":     creative_node,
+        "media_buying_node": media_buying_node,
+        "photo_select_node": photo_select_node,
+        "text_review_node":  text_review_node,
+        # Merge + Compliance (Phase 2)
+        "merge_node":        merge_node,
+        "compliance_node":   compliance_node,
+        # Operate lifecycle (Phase 4)
+        "diagnose_node":     diagnose_node,
+        "decision_node":     decision_node,
+        "act_node":          act_node,
+    }
+    for _name, _fn in _node_map.items():
+        builder.add_node(_name, _wrap(_name, _fn))
 
     # ── Entry: route by campaign_phase ────────────────────────────────
     # Operate re-entries bypass the full build path.
