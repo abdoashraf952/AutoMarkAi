@@ -185,11 +185,11 @@ function Control({ chat, onEnd }: { chat: CampaignChat; onEnd?: () => void }) {
     case "published":
       return (
         <div className="flex flex-wrap gap-2.5">
-          <button onClick={chat.restart} className="btn-primary flex-1">
-            ✦ {tr("newCampaign")}
+          <button onClick={() => onEnd?.()} className="btn-primary flex-1">
+            🏠 {rtl ? "العودة للرئيسية" : "Return to Home"}
           </button>
-          <button onClick={() => onEnd?.()} className="btn-ghost flex-1">
-            {tr("endBtn")}
+          <button onClick={chat.restart} className="btn-ghost flex-1">
+            ✦ {tr("newCampaign")}
           </button>
         </div>
       );

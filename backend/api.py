@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import AsyncGenerator
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -56,10 +57,26 @@ _sessions: dict[str, dict] = {}
 _uploaded_files: dict[str, str] = {}
 
 
-async def _new_session() -> str:
+def _extract_user(authorization: Optional[str]) -> dict | None:
+    """Pull user info from 'Bearer <token>' header. Returns None if absent/invalid."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    from AutoMarkAi.backend.auth import decode_token
+    return decode_token(authorization[7:])
+
+
+async def _require_user(authorization: Optional[str] = Header(None)) -> dict:
+    user = _extract_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return user
+
+
+async def _new_session(user_id: str | None = None) -> str:
     sid = str(uuid.uuid4())
     _sessions[sid] = {
         "thread_id": sid,
+        "user_id": user_id,           # None for unauthenticated sessions
         "ui_stage": "setup",
         "interrupt_data": {},
         "image_paths": [],
@@ -121,6 +138,13 @@ _scheduler = None
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     global _scheduler
+    # Initialise business DB tables (non-fatal if POSTGRES_URL not set)
+    try:
+        from AutoMarkAi.backend import db as _db
+        await asyncio.to_thread(_db.init_db)
+    except Exception as _e:
+        logger.warning("DB init skipped: %s", _e)
+
     from AutoMarkAi.backend.workers.scheduler import CampaignScheduler
     _scheduler = CampaignScheduler(_sessions, _get_graph, demo_mode=True)
     await _scheduler.start()
@@ -270,8 +294,16 @@ class ApprovalBody(BaseModel):
 # ------------------------------------------------------------------ #
 
 @app.post("/session", summary="Create a new campaign session", tags=["Session"])
-async def create_session():
-    sid = await _new_session()
+async def create_session(authorization: Optional[str] = Header(None)):
+    user = _extract_user(authorization)
+    user_id = user["user_id"] if user else None
+    sid = await _new_session(user_id)
+    if user_id:
+        try:
+            from AutoMarkAi.backend import db as _db
+            await asyncio.to_thread(_db.create_campaign_draft, user_id=user_id, thread_id=sid)
+        except Exception as _e:
+            logger.warning("DB create_campaign_draft failed: %s", _e)
     return {"session_id": sid}
 
 
@@ -359,6 +391,17 @@ async def start_session(
         approval_mode=effective_mode,
         image_count=len(image_paths),
     )
+    if session.get("user_id"):
+        try:
+            from AutoMarkAi.backend import db as _db
+            await asyncio.to_thread(
+                _db.update_campaign_start,
+                thread_id=session_id,
+                budget=float(budget),
+                language=language,
+            )
+        except Exception as _e:
+            logger.warning("DB update_campaign_start failed: %s", _e)
 
     await _advance(session, {
         "image_paths": image_paths,
@@ -540,6 +583,29 @@ async def publish(session_id: str, body: PublishBody = PublishBody()):
                 },
             )
 
+        # Persist Meta IDs + bundle to the business DB
+        if session.get("user_id"):
+            compound_name = (
+                (bundle.get("real_estate_project") or {}).get("compound_name")
+                or (final.get("real_estate_data") or {}).get("compound_name")
+                or "Unknown Compound"
+            )
+            try:
+                from AutoMarkAi.backend import db as _db
+                await asyncio.to_thread(
+                    _db.update_campaign_publish,
+                    thread_id=session_id,
+                    compound_name=compound_name,
+                    meta_campaign_id=campaign_id,
+                    meta_adset_id=adset_id,
+                    meta_creative_id=(result.get("creative") or {}).get("id", ""),
+                    meta_ad_id=(result.get("ad") or {}).get("id", ""),
+                    meta_post_id=(result.get("post") or {}).get("id", ""),
+                    campaign_bundle=bundle or {},
+                )
+            except Exception as _e:
+                logger.warning("DB update_campaign_publish failed: %s", _e)
+
         # Persist session summary to long-term memory (Phase 5)
         client_ref = final.get("client_memory_ref") or ""
         if client_ref:
@@ -665,3 +731,67 @@ async def health():
         "status": "ok",
         "scheduler_running": _scheduler is not None,
     }
+
+
+# ------------------------------------------------------------------ #
+# Auth endpoints                                                       #
+# ------------------------------------------------------------------ #
+
+class AuthBody(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/register", summary="Register a new account", tags=["Auth"])
+async def register(body: AuthBody):
+    if len(body.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    if "@" not in body.email:
+        raise HTTPException(400, "Invalid email address")
+    from AutoMarkAi.backend import auth as _auth, db as _db
+    import psycopg2
+    pw_hash = await asyncio.to_thread(_auth.hash_password, body.password)
+    try:
+        user = await asyncio.to_thread(_db.create_user, email=body.email, pw_hash=pw_hash)
+    except psycopg2.errors.UniqueViolation:
+        raise HTTPException(409, "An account with this email already exists")
+    except Exception as exc:
+        raise HTTPException(500, f"Registration failed: {exc}")
+    token = _auth.create_token(user["id"], user["email"])
+    return {"token": token, "user_id": user["id"], "email": user["email"]}
+
+
+@app.post("/auth/login", summary="Login with email + password", tags=["Auth"])
+async def login(body: AuthBody):
+    from AutoMarkAi.backend import auth as _auth, db as _db
+    user = await asyncio.to_thread(_db.find_user_by_email, body.email)
+    if not user or not _auth.verify_password(body.password, user["pw_hash"]):
+        raise HTTPException(401, "Incorrect email or password")
+    token = _auth.create_token(user["id"], user["email"])
+    return {"token": token, "user_id": user["id"], "email": user["email"]}
+
+
+# ------------------------------------------------------------------ #
+# Campaigns (per-user business records)                               #
+# ------------------------------------------------------------------ #
+
+@app.get("/users/me/campaigns", summary="List all campaigns for the logged-in user", tags=["Campaigns"])
+async def get_my_campaigns(user: dict = Depends(_require_user)):
+    from AutoMarkAi.backend import db as _db
+    try:
+        campaigns = await asyncio.to_thread(_db.list_campaigns, user["user_id"])
+        return campaigns
+    except Exception as exc:
+        raise HTTPException(500, f"Database error: {exc}")
+
+
+@app.get("/users/me/campaigns/{campaign_id}", summary="Get campaign detail including bundle", tags=["Campaigns"])
+async def get_campaign_detail(campaign_id: str, user: dict = Depends(_require_user)):
+    from AutoMarkAi.backend import db as _db
+    try:
+        campaign = await asyncio.to_thread(_db.get_campaign, campaign_id, user["user_id"])
+    except Exception as exc:
+        raise HTTPException(500, f"Database error: {exc}")
+    if not campaign:
+        raise HTTPException(404, "Campaign not found")
+    return campaign

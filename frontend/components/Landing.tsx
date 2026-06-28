@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import type { AuthUser } from "@/hooks/useAuth";
 
 /* ── Shared building SVG icon ──────────────────────────────────────── */
 export function BuildingIcon({ size = 36 }: { size?: number }) {
@@ -87,9 +88,49 @@ function FloatingCard({
 }
 
 /* ── Main component ─────────────────────────────────────────────────── */
-export default function Landing({ onStart }: { onStart: () => void }) {
+export default function Landing({
+  onStart,
+  user,
+  onMyCampaigns,
+  onLogout,
+}: {
+  onStart:       () => void;
+  user?:         AuthUser | null;
+  onMyCampaigns?: () => void;
+  onLogout?:     () => void;
+}) {
   return (
     <main className="relative flex h-[100dvh] flex-col items-center justify-center overflow-hidden px-6 text-center">
+
+      {/* ── Top nav (only when logged in) ─── */}
+      {user && (
+        <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-2">
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-xl"
+              style={{ background: "linear-gradient(135deg, #B8860B 0%, #C9A84C 50%, #D97706 100%)" }}
+            >
+              <BuildingIcon size={16} />
+            </div>
+            <span className="text-xs font-semibold text-white/60">{user.email}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onMyCampaigns}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3.5 py-1.5 text-xs font-semibold text-white/75 transition hover:bg-white/10 hover:text-white"
+              style={{ transition: "all 0.2s" }}
+            >
+              📋 My Campaigns
+            </button>
+            <button
+              onClick={onLogout}
+              className="rounded-xl border border-white/8 bg-white/4 px-3.5 py-1.5 text-xs text-white/40 transition hover:text-white/70"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Left floating card: property listing ── */}
       <FloatingCard

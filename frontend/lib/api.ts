@@ -22,6 +22,13 @@ import type {
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
 
+/** Read the stored JWT from localStorage and return an Authorization header object. */
+function _authHeader(): HeadersInit {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem("automark_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -46,7 +53,10 @@ async function parse<T>(res: Response): Promise<T> {
 }
 
 export async function createSession(): Promise<SessionResponse> {
-  const res = await fetch(`${API_BASE}/session`, { method: "POST" });
+  const res = await fetch(`${API_BASE}/session`, {
+    method:  "POST",
+    headers: _authHeader(),   // attach token so the backend links session to user
+  });
   return parse<SessionResponse>(res);
 }
 
@@ -210,4 +220,63 @@ export function toDataUrl(base64: string, mime = "image/png"): string {
   if (!base64) return "";
   if (base64.startsWith("data:")) return base64;
   return `data:${mime};base64,${base64}`;
+}
+
+// ---- Auth ----------------------------------------------------------------- //
+
+export interface AuthResponse {
+  token:   string;
+  user_id: string;
+  email:   string;
+}
+
+export async function authRegister(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ email, password }),
+  });
+  return parse<AuthResponse>(res);
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ email, password }),
+  });
+  return parse<AuthResponse>(res);
+}
+
+// ---- Campaign records ----------------------------------------------------- //
+
+export interface CampaignRecord {
+  id:               string;
+  thread_id:        string;
+  compound_name:    string | null;
+  status:           "draft" | "published";
+  budget:           number | null;
+  language:         string | null;
+  meta_campaign_id: string | null;
+  meta_adset_id:    string | null;
+  meta_creative_id: string | null;
+  meta_ad_id:       string | null;
+  meta_post_id:     string | null;
+  campaign_bundle:  CampaignBundle | null;
+  created_at:       string;
+  published_at:     string | null;
+}
+
+export async function listMyCampaigns(): Promise<CampaignRecord[]> {
+  const res = await fetch(`${API_BASE}/users/me/campaigns`, {
+    headers: _authHeader(),
+  });
+  return parse<CampaignRecord[]>(res);
+}
+
+export async function getMyCampaign(campaignId: string): Promise<CampaignRecord> {
+  const res = await fetch(`${API_BASE}/users/me/campaigns/${campaignId}`, {
+    headers: _authHeader(),
+  });
+  return parse<CampaignRecord>(res);
 }
