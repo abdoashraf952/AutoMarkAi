@@ -71,15 +71,17 @@ class Settings(BaseSettings):
     MAX_CONVERSATION_HISTORY: int = 20
     SUMMARIZATION_MESSAGE_THRESHOLD: int = 20
 
-    # ── Gmail notifications (handoff escalation emails) ───────────────────────
+    # ── Email notifications (handoff escalation emails) ───────────────────────
     GMAIL_SENDER: str = ""        # Gmail address used to send notifications
     GMAIL_APP_PASSWORD: str = ""  # Google App Password (not your account password)
     GMAIL_RECIPIENT: str = ""     # Email address that receives handoff alerts
+    RESEND_API_KEY: str = ""      # Resend.com API key (re_xxx) — works over HTTPS, no firewall issues
 
     # ── Application ──────────────────────────────────────────────────────────
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "console"   # "console" (human-readable) | "json" (production)
     DEBUG: bool = False
     MAX_AGENT_ITERATIONS: int = 6
 

@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Ensure upload directories exist
-RUN mkdir -p CRM/uploads "Data Analytics/uploads"
+RUN mkdir -p CRM/uploads data-analytics-assistant/uploads
 
 # Streamlit configuration for the analytics service
 RUN mkdir -p /root/.streamlit && printf '\

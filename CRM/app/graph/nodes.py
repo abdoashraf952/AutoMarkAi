@@ -350,7 +350,12 @@ async def handoff_node(state: GraphState, config: Optional[RunnableConfig] = Non
     priority = "high" if lead.get("lead_temperature") == "qualified" else "medium"
 
     result = await escalate_to_human(
-        user_id=state["user_id"], reason=reason, priority=priority, lead=lead
+        user_id=state["user_id"],
+        reason=reason,
+        priority=priority,
+        lead=lead,
+        summary=state.get("summary"),
+        recent_messages=state.get("recent_messages", []),
     )
 
     return {

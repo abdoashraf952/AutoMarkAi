@@ -57,6 +57,7 @@ docker-compose.override.yml
 
 # ── Uploads / runtime data ────────────────────────────────────────────────────
 uploads/
+handoffs/
 CRM/uploads/
 Data Analytics/uploads/
 

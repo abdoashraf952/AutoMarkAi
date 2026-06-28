@@ -28,7 +28,8 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 GRAPH_BASE = "https://graph.facebook.com/v19.0"
-SEND_API_URL = f"{GRAPH_BASE}/me/messages"
+# Use explicit Page ID — /me/messages fails when the token is not bound to a page context
+SEND_API_URL = f"{GRAPH_BASE}/{settings.MESSENGER_PAGE_ID}/messages"
 
 def _messenger_headers() -> dict:
     return {
@@ -143,8 +144,12 @@ class MessengerAdapter:
             logger.info("messenger.message_sent", recipient=recipient_id)
             return {"success": True, "message_id": body.get("message_id")}
         except httpx.HTTPStatusError as exc:
-            logger.error("messenger.send_error", status=exc.response.status_code, body=exc.response.text[:500])
-            return {"success": False, "error": exc.response.text[:200]}
+            body = exc.response.text[:500]
+            hint = ""
+            if exc.response.status_code in (400, 500) and "OAuthException" in body:
+                hint = "Token is a User Access Token, not a Page Access Token. Go to Graph API Explorer → /me/accounts → copy the page access_token for page 1157776887417971"
+            logger.error("messenger.send_error", status=exc.response.status_code, body=body, hint=hint or None)
+            return {"success": False, "error": body[:200]}
         except Exception as exc:
             logger.error("messenger.send_error", error=str(exc))
             return {"success": False, "error": str(exc)}
@@ -178,9 +183,8 @@ class MessengerAdapter:
     async def send_message_to_commenter(self, comment_id: str, text: str) -> dict:
         """
         Send a private Messenger DM to someone who commented on a Page post.
-        Meta allows using {"comment_id": ...} as the recipient, which opens a
-        private thread in the commenter's Messenger inbox.
-        Requires pages_messaging permission on the Page access token.
+        Meta routes {"comment_id": ...} as a private message in the commenter's
+        Messenger inbox. Requires pages_messaging permission.
         """
         payload = {
             "recipient": {"comment_id": comment_id},

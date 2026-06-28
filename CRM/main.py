@@ -1,20 +1,20 @@
 """
-CRM/main.py — AutoMark AI CRM Agent (ORCAST)
+main.py — AutoMark AI CRM Agent (ORCAST)
+FastAPI application entry point.
 
-FastAPI application entry point. Registers all webhook routers and manages
-the asyncpg connection pool + LangGraph compilation lifecycle.
+Platforms : Facebook Messenger, Facebook Page Comments, Vapi Voice
+LLM       : Google Gemini, orchestrated via a LangGraph StateGraph (ORCAST)
+Memory    : PostgreSQL + pgvector (rolling-summarization memory + hybrid RAG)
+CRM       : HubSpot
+Tracing   : LangSmith
 """
 
 from __future__ import annotations
 
+import logging
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
-
-# Ensure the repo root (parent of CRM/) is on sys.path so `config.py` is importable.
-_repo_root = Path(__file__).resolve().parent.parent
-if str(_repo_root) not in sys.path:
-    sys.path.insert(0, str(_repo_root))
+from typing import AsyncGenerator
 
 import structlog
 import uvicorn
@@ -22,27 +22,94 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from app.db import close_pool, init_db
-from app.graph.orchestrator import compiled_graph  # import triggers graph compilation
-from app.api import messenger, facebook_comments, vapi
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Structured logging
+# ─────────────────────────────────────────────────────────────────────────────
+
+def configure_logging() -> None:
+    shared_processors = [
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.set_exc_info,
+    ]
+    renderer = (
+        structlog.dev.ConsoleRenderer(sort_keys=False)
+        if settings.LOG_FORMAT == "console"
+        else structlog.processors.JSONRenderer()
+    )
+    structlog.configure(
+        processors=shared_processors + [renderer],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(settings.LOG_LEVEL)),
+        context_class=dict,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+
+configure_logging()
 logger = structlog.get_logger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("crm.startup.begin")
-    await init_db()
-    logger.info("crm.startup.complete", graph_nodes=len(compiled_graph.nodes))
-    yield
-    logger.info("crm.shutdown.begin")
-    await close_pool()
-    logger.info("crm.shutdown.complete")
+# ─────────────────────────────────────────────────────────────────────────────
+# Lifespan
+# ─────────────────────────────────────────────────────────────────────────────
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator:
+    logger.info(
+        "automark_crm.starting",
+        model=settings.GEMINI_MODEL,
+        host=settings.APP_HOST,
+        port=settings.APP_PORT,
+        debug=settings.DEBUG,
+    )
+
+    # ── PostgreSQL + pgvector ────────────────────────────────────────────────
+    try:
+        from app.db import init_db
+
+        await init_db()
+        logger.info("startup.postgres_ok")
+    except Exception as exc:
+        logger.error("startup.postgres_error", error=str(exc))
+        sys.exit(1)
+
+    # ── ORCAST graph (pre-warm / validate compilation) ──────────────────────
+    try:
+        from app.graph.orchestrator import compiled_graph  # noqa: F401
+
+        logger.info("startup.orcast_graph_compiled")
+    except Exception as exc:
+        logger.error("startup.orcast_graph_error", error=str(exc))
+        sys.exit(1)
+
+    logger.info("automark_crm.ready")
+    yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    from app.db import close_pool
+
+    await close_pool()
+    logger.info("automark_crm.shutdown")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI app
+# ─────────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="AutoMark AI CRM Agent (ORCAST)",
+    title="AutoMark AI — ORCAST CRM Agent",
+    description=(
+        "LangGraph + Gemini CRM agent (ORCAST). "
+        "Handles Messenger, Facebook Page Comments, and Vapi voice calls."
+    ),
     version="3.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan,
 )
 
@@ -50,24 +117,142 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.DEBUG else [],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
-app.include_router(messenger.router, tags=["messenger"])
-app.include_router(facebook_comments.router, tags=["facebook"])
-app.include_router(vapi.router, tags=["vapi"])
+# ── Routers ──────────────────────────────────────────────────────────────────
+from app.api.messenger import router as messenger_router
+from app.api.facebook_comments import router as facebook_router
+from app.api.vapi import router as vapi_router
+from app.api.admin import router as admin_router
+
+app.include_router(messenger_router, tags=["Messenger"])
+app.include_router(facebook_router, tags=["Facebook Page Comments"])
+app.include_router(vapi_router, tags=["Vapi"])
+app.include_router(admin_router)
 
 
-@app.get("/")
-async def root():
-    return {"service": "AutoMark AI CRM Agent (ORCAST)", "version": "3.0.0", "status": "running"}
+# ─────────────────────────────────────────────────────────────────────────────
+# Health endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/", tags=["Health"])
+async def root() -> dict:
+    return {"service": "AutoMark AI ORCAST CRM Agent", "version": "3.0.0", "status": "running"}
 
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+@app.get("/health", tags=["Health"])
+async def health_check() -> dict:
+    return {"status": "healthy", "version": "3.0.0"}
 
+
+@app.get("/health/deep", tags=["Health"])
+async def deep_health_check() -> dict:
+    import httpx
+
+    results: dict = {"status": "healthy", "checks": {}}
+
+    # PostgreSQL + pgvector
+    try:
+        from app.db import get_pool
+        from app.rag import vector_store
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        results["checks"]["postgres"] = {"status": "ok", "knowledge_base_chunks": await vector_store.count()}
+    except Exception as exc:
+        results["checks"]["postgres"] = {"status": "error", "error": str(exc)}
+        results["status"] = "degraded"
+
+    # HubSpot
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{settings.HUBSPOT_BASE_URL}/crm/v3/objects/contacts?limit=1",
+                headers={"Authorization": f"Bearer {settings.HUBSPOT_ACCESS_TOKEN}"},
+            )
+        results["checks"]["hubspot"] = {
+            "status": "ok" if resp.status_code == 200 else "error",
+            "http_status": resp.status_code,
+        }
+    except Exception as exc:
+        results["checks"]["hubspot"] = {"status": "error", "error": str(exc)}
+        results["status"] = "degraded"
+
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Admin endpoints (DEBUG only)
+# ─────────────────────────────────────────────────────────────────────────────
+
+if settings.DEBUG:
+
+    @app.post("/admin/ingest", tags=["Admin"])
+    async def trigger_ingestion(reset: bool = False) -> dict:
+        from pathlib import Path
+
+        from app.rag.ingest import DocumentIngester
+
+        ingester = DocumentIngester()
+        return await ingester.ingest_directory(Path(settings.KNOWLEDGE_BASE_PATH), reset=reset)
+
+    @app.get("/admin/memory/{user_id}", tags=["Admin"])
+    async def get_user_memory(user_id: str) -> dict:
+        from app.memory.postgres_memory import postgres_memory
+
+        return await postgres_memory.load(user_id)
+
+    @app.delete("/admin/memory/{user_id}", tags=["Admin"])
+    async def clear_user_memory(user_id: str) -> dict:
+        from app.memory.postgres_memory import postgres_memory
+
+        await postgres_memory.clear(user_id)
+        return {"cleared": True, "user_id": user_id}
+
+    @app.post("/admin/summarize/{user_id}", tags=["Admin"])
+    async def trigger_summarize(user_id: str) -> dict:
+        from app.memory.postgres_memory import postgres_memory
+
+        summary = await postgres_memory.summarize(user_id)
+        return {"user_id": user_id, "summary": summary}
+
+    @app.post("/admin/simulate", tags=["Admin"])
+    async def simulate_message(user_id: str, source: str = "messenger", content: str = "Hello") -> dict:
+        """Simulate an inbound message without a real webhook — for local testing."""
+        from app.graph.orchestrator import run_graph
+        from app.services.gemini_service import UnifiedMessage
+
+        message = UnifiedMessage(
+            user_id=user_id,
+            source=source,
+            input_type="text",
+            content=content,
+            metadata={"simulated": True},
+        )
+        response = await run_graph(message)
+        return {
+            "user_id": user_id,
+            "input": content,
+            "response": response.message,
+            "tools_called": response.tools_called,
+            "lead_updated": response.lead_updated,
+            "escalated": response.escalated,
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=settings.APP_HOST, port=settings.APP_PORT, reload=settings.DEBUG)
+    uvicorn.run(
+        "main:app",
+        host=settings.APP_HOST,
+        port=settings.APP_PORT,
+        reload=settings.DEBUG,
+        log_level=settings.LOG_LEVEL.lower(),
+        workers=1,
+    )

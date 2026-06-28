@@ -177,48 +177,73 @@ When a conversation is escalated to a human, a notification email is sent automa
 
 ## Local Development (without Docker)
 
-You need PostgreSQL 16 with the pgvector extension installed locally.
+> **The database must be running before either app starts.** The easiest way is to start just the PostgreSQL container from Docker Compose, then run the apps natively.
 
-**1. Install PostgreSQL + pgvector**
-
-```bash
-# macOS
-brew install postgresql@16
-brew install pgvector
-
-# Ubuntu/Debian
-sudo apt install postgresql-16 postgresql-16-pgvector
-```
-
-**2. Create the database**
+### Option A — DB in Docker, apps native (recommended for dev)
 
 ```bash
-psql -U postgres -c "CREATE DATABASE automark;"
-psql -U postgres -d automark -f CRM/scripts/init_db.sql
-```
+# 1. Start only the database container (stays running in background)
+docker-compose up db -d
 
-**3. Install Python dependencies**
-
-```bash
+# 2. Install Python dependencies (once)
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-```
 
-**4. Run the CRM**
-
-```bash
-# From the project root
+# 3. Run the CRM (in one terminal, from project root)
 cd CRM
 PYTHONPATH=.. uvicorn main:app --reload --port 8000
+
+# 4. Run the Analytics Assistant (in another terminal, from project root)
+cd ..   # back to AutoMarkAi/
+streamlit run data-analytics-assistant/app/ui/streamlit_app.py --server.port 8501
+
+# 5. Stop the database when done
+docker-compose down db
 ```
 
-**5. Run the Analytics Assistant**
+### Option B — Full local PostgreSQL install
+
+You need PostgreSQL 16 with the pgvector extension installed.
 
 ```bash
-# From the project root
-streamlit run "Data Analytics/app/ui/streamlit_app.py" --server.port 8501
+# macOS
+brew install postgresql@16 pgvector
+
+# Ubuntu/Debian
+sudo apt install postgresql-16 postgresql-16-pgvector
+
+# Windows (WSL)
+sudo apt install postgresql postgresql-contrib
+# pgvector must be built from source on WSL — see https://github.com/pgvector/pgvector
 ```
+
+Once PostgreSQL is running:
+
+```bash
+# Create the shared database and schema
+psql -U postgres -c "CREATE DATABASE automark;"
+psql -U postgres -d automark -f CRM/scripts/init_db.sql
+
+# Install deps
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# CRM (terminal 1, from project root)
+cd CRM && PYTHONPATH=.. uvicorn main:app --reload --port 8000
+
+# Analytics (terminal 2, from project root)
+streamlit run data-analytics-assistant/app/ui/streamlit_app.py --server.port 8501
+```
+
+### Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Connection refused` on CRM start | PostgreSQL not running | Run `docker-compose up db -d` first |
+| `role "postgres" does not exist` | Wrong DB user | Check `DB_USER` in `.env` |
+| `database "automark" does not exist` | Schema not initialised | Run `psql -U postgres -f CRM/scripts/init_db.sql` |
+| Streamlit `ModuleNotFoundError: app` | Wrong working directory | Run streamlit from project root, not from `Data Analytics/` |
 
 ---
 
@@ -226,47 +251,54 @@ streamlit run "Data Analytics/app/ui/streamlit_app.py" --server.port 8501
 
 ```
 AutoMarkAi/
-├── .env                          ← fill in secrets (gitignored)
-├── .env.example                  ← template — copy to .env
-├── docker-compose.yml            ← starts db + crm + analytics
-├── Dockerfile                    ← single image for both services
-├── requirements.txt              ← combined Python dependencies
-├── config.py                     ← CRM settings (pydantic-settings)
-├── main.py                       ← Analytics CLI launcher
+├── .env                              ← fill in secrets (gitignored)
+├── .env.example                      ← template — copy to .env
+├── config.py                         ← unified settings (pydantic-settings)
+├── docker-compose.yml                ← starts db + crm + analytics
+├── Dockerfile                        ← single image for both services
+├── requirements.txt                  ← combined Python dependencies
+├── start.sh                          ← local dev launcher (starts DB first)
 │
-├── CRM/                          ← CRM Agent (ORCAST)
-│   ├── main.py                   ← FastAPI entry point
+├── shared/                           ← cross-project utilities
+│   ├── crm_models.py                 ← SQLAlchemy models for CRM tables (read-only)
+│   └── crm_reader.py                 ← load CRM tables as DataFrames for Analytics
+│
+├── CRM/                              ← CRM Agent (ORCAST)
+│   ├── __init__.py
+│   ├── main.py                       ← FastAPI entry point
+│   ├── config.py                     ← thin redirect → root config.py
 │   ├── app/
 │   │   ├── api/
-│   │   │   ├── messenger.py      ← Messenger webhook + DM sender
-│   │   │   ├── facebook_comments.py ← Page Comments webhook
-│   │   │   └── vapi.py           ← Vapi voice webhook
-│   │   ├── graph/                ← LangGraph ORCAST orchestrator
+│   │   │   ├── messenger.py          ← Messenger webhook + DM sender
+│   │   │   ├── facebook_comments.py  ← Page Comments webhook
+│   │   │   └── vapi.py               ← Vapi voice webhook
+│   │   ├── graph/                    ← LangGraph ORCAST orchestrator
 │   │   ├── tools/
-│   │   │   ├── handoff_tool.py   ← escalation → HubSpot + Gmail
-│   │   │   ├── hubspot_tool.py   ← CRM operations
+│   │   │   ├── handoff_tool.py       ← escalation → HubSpot + Gmail
+│   │   │   ├── hubspot_tool.py       ← CRM operations
 │   │   │   ├── lead_scoring_tool.py
-│   │   │   ├── messaging_tool.py ← reply delivery (comment + DM)
-│   │   │   └── rag_tool.py       ← knowledge base search
-│   │   ├── memory/               ← rolling-summarization memory
-│   │   ├── rag/                  ← hybrid vector + full-text search
+│   │   │   ├── messaging_tool.py     ← reply delivery (comment + DM)
+│   │   │   └── rag_tool.py           ← knowledge base search
+│   │   ├── memory/                   ← rolling-summarization memory
+│   │   ├── rag/                      ← hybrid vector + full-text search
 │   │   └── services/
-│   │       ├── email_service.py  ← Gmail handoff notifications
-│   │       ├── gemini_service.py ← Gemini multimodal client
-│   │       └── hubspot_service.py ← HubSpot REST client
-│   ├── knowledge_base/           ← documents ingested for RAG
+│   │       ├── email_service.py      ← Gmail handoff notifications
+│   │       ├── gemini_service.py     ← Gemini multimodal client
+│   │       └── hubspot_service.py    ← HubSpot REST client
+│   ├── knowledge_base/               ← documents ingested for RAG
 │   └── scripts/
-│       └── init_db.sql           ← PostgreSQL schema (pgvector tables)
+│       └── init_db.sql               ← PostgreSQL schema (pgvector tables)
 │
-└── Data Analytics/               ← Analytics Assistant
+└── data-analytics-assistant/         ← Analytics Assistant
+    ├── __init__.py
     └── app/
-        ├── agents/               ← 8 AI agents (load, profile, KPI, insight…)
-        ├── database/             ← SQLAlchemy models + repository
-        ├── graph/                ← LangGraph analytics workflow
-        ├── schemas/              ← Pydantic data models
-        ├── services/             ← Gemini, dataframe, SQL, storage
+        ├── agents/                   ← 8 AI agents (load, profile, KPI, insight…)
+        ├── database/                 ← SQLAlchemy models + repository
+        ├── graph/                    ← LangGraph analytics workflow
+        ├── schemas/                  ← Pydantic data models
+        ├── services/                 ← Gemini, dataframe, SQL, storage
         └── ui/
-            └── streamlit_app.py  ← 6-tab Streamlit interface
+            └── streamlit_app.py      ← 6-tab Streamlit UI + CRM data loader
 ```
 
 ---

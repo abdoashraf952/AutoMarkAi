@@ -41,7 +41,8 @@ services:
     build: .
     container_name: automark_analytics
     restart: unless-stopped
-    command: ["streamlit", "run", "Data Analytics/app/ui/streamlit_app.py",
+    command: ["streamlit", "run",
+              "data-analytics-assistant/app/ui/streamlit_app.py",
               "--server.port=8501", "--server.address=0.0.0.0"]
     env_file: .env
     environment:
@@ -56,7 +57,7 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - "./Data Analytics/uploads:/app/Data Analytics/uploads"
+      - ./data-analytics-assistant/uploads:/app/data-analytics-assistant/uploads
 
 volumes:
   postgres_data:

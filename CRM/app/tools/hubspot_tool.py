@@ -32,20 +32,34 @@ async def crm_operation(operation: str, data: dict[str, Any]) -> dict[str, Any]:
 
     try:
         if operation == "create_contact":
-            return await hubspot_service.find_or_create_contact(data)
+            result = await hubspot_service.find_or_create_contact(data)
         elif operation == "update_contact":
-            return await hubspot_service.update_contact(data)
+            result = await hubspot_service.update_contact(data)
         elif operation == "search_contact":
-            return await hubspot_service.search_contact(data)
+            result = await hubspot_service.search_contact(data)
         elif operation == "get_contact":
-            return await hubspot_service.get_contact(data)
+            result = await hubspot_service.get_contact(data)
         elif operation == "create_deal":
-            return await hubspot_service.create_deal(data)
+            result = await hubspot_service.create_deal(data)
         elif operation == "update_deal":
-            return await hubspot_service.update_deal(data)
+            result = await hubspot_service.update_deal(data)
         else:
             logger.warning("hubspot_tool.unknown_operation", operation=operation)
-            return {"success": False, "error": f"Unknown operation: {operation}"}
+            return {"success": False, "error": f"Unknown operation: {operation}", "retryable": False}
+
+        # Tell Gemini not to retry permission or auth failures
+        if not result.get("success"):
+            err = result.get("error", "")
+            if any(s in err for s in ("403", "permission", "missing required scopes", "Unauthorized")):
+                result["retryable"] = False
+                result["action"] = "escalate"
+                result["message"] = (
+                    "HubSpot integration requires additional permissions. "
+                    "Do not retry — escalate this conversation to a human agent instead."
+                )
+
+        return result
+
     except Exception as exc:
         log.error("hubspot_tool.error", error=str(exc), exc_info=True)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": str(exc), "retryable": False}

@@ -56,12 +56,12 @@ _chain = None  # lazy — built on first call to avoid import-time side effects
 def _get_chain():
     global _chain
     if _chain is None:
-        llm = ChatGoogleGenerativeAI(
+        _llm = ChatGoogleGenerativeAI(
             model=settings.GEMINI_MODEL,
             temperature=0.1,
             google_api_key=settings.GEMINI_API_KEY,
         )
-        _chain = _prompt | llm | StrOutputParser()
+        _chain = _prompt | _llm | StrOutputParser()
     return _chain
 
 NO_INFO_RESPONSE = (

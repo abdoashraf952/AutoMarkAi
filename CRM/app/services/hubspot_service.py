@@ -59,96 +59,120 @@ class HubSpotService:
     async def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.request(method, url, headers=self._headers, **kwargs)
+            if resp.status_code == 403:
+                raise httpx.HTTPStatusError(
+                    f"HubSpot 403 — token missing required scopes. "
+                    f"Go to HubSpot → Settings → Integrations → Private Apps → your app → Scopes "
+                    f"and enable: crm.objects.contacts.read, crm.objects.contacts.write, "
+                    f"crm.objects.deals.read, crm.objects.deals.write, crm.objects.notes.write",
+                    request=resp.request,
+                    response=resp,
+                )
             resp.raise_for_status()
             return resp
+
+    def _hs_error(self, operation: str, exc: Exception) -> dict:
+        msg = str(exc)[:300]
+        if "403" in msg or "missing required scopes" in msg:
+            logger.warning(
+                "hubspot_service.permission_error",
+                operation=operation,
+                fix="HubSpot Private App → Scopes: enable crm.objects.contacts.read/write, "
+                    "crm.objects.deals.read/write, crm.objects.notes.write",
+            )
+        else:
+            logger.error("hubspot_service.error", operation=operation, error=msg)
+        return {"success": False, "error": msg, "operation": operation}
 
     # ── Contact operations ───────────────────────────────────────────────────
 
     async def create_contact(self, data: dict) -> dict:
         """data keys: email, firstname, lastname, phone, company,
         hs_lead_status, lifecyclestage, notes"""
-        properties = self._build_contact_properties(data)
-        resp = await self._request("POST", CONTACTS_URL, json={"properties": properties})
-        result = resp.json()
-        contact_id = result.get("id")
-        logger.info("hubspot_service.contact_created", contact_id=contact_id)
+        try:
+            properties = self._build_contact_properties(data)
+            resp = await self._request("POST", CONTACTS_URL, json={"properties": properties})
+            result = resp.json()
+            contact_id = result.get("id")
+            logger.info("hubspot_service.contact_created", contact_id=contact_id)
 
-        if data.get("notes") and contact_id:
-            await self.create_note(contact_id, "CONTACT", data["notes"])
+            if data.get("notes") and contact_id:
+                await self.create_note(contact_id, "CONTACT", data["notes"])
 
-        return {
-            "success": True,
-            "operation": "create_contact",
-            "contact_id": contact_id,
-            "properties": result.get("properties", {}),
-        }
+            return {
+                "success": True,
+                "operation": "create_contact",
+                "contact_id": contact_id,
+                "properties": result.get("properties", {}),
+            }
+        except Exception as exc:
+            return self._hs_error("create_contact", exc)
 
     async def update_contact(self, data: dict) -> dict:
         """data keys: contact_id (or email to look up) + property fields"""
-        contact_id = data.get("contact_id")
-        if not contact_id and data.get("email"):
-            try:
+        try:
+            contact_id = data.get("contact_id")
+            if not contact_id and data.get("email"):
                 search_result = await self.search_contact({"email": data["email"]})
                 if search_result.get("contact_id"):
                     contact_id = search_result["contact_id"]
-            except Exception as exc:
-                logger.warning("hubspot_service.update_search_skipped", reason=str(exc)[:120])
 
-        if not contact_id:
-            return {"success": False, "error": "contact_id required for update"}
+            if not contact_id:
+                return {"success": False, "error": "contact_id required for update"}
 
-        properties = self._build_contact_properties(data)
-        resp = await self._request(
-            "PATCH", f"{CONTACTS_URL}/{contact_id}", json={"properties": properties}
-        )
-        logger.info("hubspot_service.contact_updated", contact_id=contact_id)
-        return {"success": True, "operation": "update_contact", "contact_id": contact_id}
+            properties = self._build_contact_properties(data)
+            await self._request("PATCH", f"{CONTACTS_URL}/{contact_id}", json={"properties": properties})
+            logger.info("hubspot_service.contact_updated", contact_id=contact_id)
+            return {"success": True, "operation": "update_contact", "contact_id": contact_id}
+        except Exception as exc:
+            return self._hs_error("update_contact", exc)
 
     async def search_contact(self, data: dict) -> dict:
         """data keys: email | phone"""
-        filters = []
-        if data.get("email"):
-            filters.append({"propertyName": "email", "operator": "EQ", "value": data["email"]})
-        elif data.get("phone"):
-            filters.append({"propertyName": "phone", "operator": "EQ", "value": data["phone"]})
+        try:
+            filters = []
+            if data.get("email"):
+                filters.append({"propertyName": "email", "operator": "EQ", "value": data["email"]})
+            elif data.get("phone"):
+                filters.append({"propertyName": "phone", "operator": "EQ", "value": data["phone"]})
 
-        if not filters:
-            return {"success": False, "error": "email or phone required for search"}
+            if not filters:
+                return {"success": False, "error": "email or phone required for search"}
 
-        payload = {
-            "filterGroups": [{"filters": filters}],
-            "properties": CONTACT_PROPERTIES.split(","),
-            "limit": 1,
-        }
-        resp = await self._request("POST", CONTACTS_SEARCH_URL, json=payload)
-        results = resp.json().get("results", [])
+            payload = {
+                "filterGroups": [{"filters": filters}],
+                "properties": CONTACT_PROPERTIES.split(","),
+                "limit": 1,
+            }
+            resp = await self._request("POST", CONTACTS_SEARCH_URL, json=payload)
+            results = resp.json().get("results", [])
 
-        if not results:
-            return {"success": True, "found": False, "contact_id": None}
+            if not results:
+                return {"success": True, "found": False, "contact_id": None}
 
-        contact = results[0]
-        return {
-            "success": True,
-            "found": True,
-            "contact_id": contact.get("id"),
-            "properties": contact.get("properties", {}),
-        }
+            contact = results[0]
+            return {
+                "success": True,
+                "found": True,
+                "contact_id": contact.get("id"),
+                "properties": contact.get("properties", {}),
+            }
+        except Exception as exc:
+            return self._hs_error("search_contact", exc)
 
     async def get_contact(self, data: dict) -> dict:
         """data keys: contact_id"""
-        contact_id = data.get("contact_id")
-        if not contact_id:
-            return {"success": False, "error": "contact_id required"}
-
-        resp = await self._request(
-            "GET", f"{CONTACTS_URL}/{contact_id}", params={"properties": CONTACT_PROPERTIES}
-        )
-        result = resp.json()
-        return {
-            "success": True,
-            "contact_id": result.get("id"),
-            "properties": result.get("properties", {}),
-        }
+        try:
+            contact_id = data.get("contact_id")
+            if not contact_id:
+                return {"success": False, "error": "contact_id required"}
+            resp = await self._request(
+                "GET", f"{CONTACTS_URL}/{contact_id}", params={"properties": CONTACT_PROPERTIES}
+            )
+            result = resp.json()
+            return {"success": True, "contact_id": result.get("id"), "properties": result.get("properties", {})}
+        except Exception as exc:
+            return self._hs_error("get_contact", exc)
 
     async def find_or_create_contact(self, data: dict) -> dict:
         """Dedupe by email (preferred) or phone, creating a new contact only

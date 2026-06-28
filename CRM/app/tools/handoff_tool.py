@@ -4,11 +4,10 @@ app/tools/handoff_tool.py — AutoMark AI CRM Agent (ORCAST)
 `escalate_to_human` tool: escalates a conversation to a human agent.
 
 Actions performed:
-    1. Create a HubSpot note on the contact with the escalation reason
-       (if a hubspot_contact_id is known).
-    2. If the lead is "qualified" and has a deal, advance the deal stage.
-    3. Persist the escalation record via app.memory.postgres_memory
-       (also marks the conversation status as "escalated").
+    1. Create a HubSpot note on the contact with the escalation reason.
+    2. Advance the HubSpot deal stage if the lead is qualified.
+    3. Persist the escalation record in PostgreSQL.
+    4. Send a Gmail notification email with lead details AND conversation summary.
 """
 
 from __future__ import annotations
@@ -34,17 +33,21 @@ async def escalate_to_human(
     priority: str = "medium",
     lead: Optional[dict[str, Any]] = None,
     notes: Optional[str] = None,
+    summary: Optional[str] = None,
+    recent_messages: Optional[list[dict[str, Any]]] = None,
 ) -> dict:
     """
     Escalate the conversation to a human agent.
 
     Parameters
     ----------
-    user_id  : conversation user identifier
-    reason   : plain-text escalation reason (for the human agent)
-    priority : low | medium | high | urgent
-    lead     : current lead profile from memory (for context)
-    notes    : optional additional notes
+    user_id          : conversation user identifier
+    reason           : plain-text escalation reason
+    priority         : low | medium | high | urgent
+    lead             : lead profile from memory
+    notes            : optional extra notes
+    summary          : rolling conversation summary from PostgreSQL memory
+    recent_messages  : recent message turns (list of {role, content})
     """
     log = logger.bind(user_id=user_id, priority=priority)
     log.info("handoff_tool.escalating", reason=reason)
@@ -54,7 +57,9 @@ async def escalate_to_human(
 
     if lead.get("hubspot_contact_id"):
         note_id = await hubspot_service.create_note(
-            lead["hubspot_contact_id"], "CONTACT", _build_note_body(user_id, reason, priority, notes, lead)
+            lead["hubspot_contact_id"],
+            "CONTACT",
+            _build_note_body(user_id, reason, priority, notes, lead, summary),
         )
 
     if lead.get("lead_temperature") == "qualified" and lead.get("hubspot_deal_id"):
@@ -73,6 +78,8 @@ async def escalate_to_human(
         lead=lead,
         escalation_id=escalation_id,
         notes=notes,
+        summary=summary,
+        recent_messages=recent_messages or [],
     )
 
     log.info("handoff_tool.escalated", escalation_id=escalation_id, note_id=note_id)
@@ -95,6 +102,7 @@ def _build_note_body(
     priority: str,
     notes: Optional[str],
     lead: dict[str, Any],
+    summary: Optional[str],
 ) -> str:
     lines = [
         "HUMAN HANDOFF REQUEST",
@@ -110,4 +118,6 @@ def _build_note_body(
         lines.append(f"Name: {lead['name']}")
     if lead.get("email"):
         lines.append(f"Email: {lead['email']}")
+    if summary:
+        lines.append(f"\nConversation Summary:\n{summary}")
     return "\n".join(lines)
