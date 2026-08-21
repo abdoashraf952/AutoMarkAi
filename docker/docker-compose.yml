@@ -1,0 +1,110 @@
+# AutoMark AI — one database, one API, one frontend.
+#
+# Config: this file reads docker/.env — every key for every module, in one
+# place. First run: cp docker/.env.example docker/.env, then fill it in.
+# (docker/.env is gitignored — see the repo-root .env.example for where to
+# get each key.) docker compose also uses docker/.env for its own variable
+# substitution (${POSTGRES_USER}, ${NEXT_PUBLIC_API_BASE}, ...) since it is
+# colocated with this file.
+#
+# Run from the repo root:
+#     docker compose -f docker/docker-compose.yml up --build
+#
+# Services
+#   db        PostgreSQL 16 + pgvector — the single database for all modules
+#   api       the unified FastAPI app (CRM + Campaigns + Analytics) on :8000
+#   web       the Next.js frontend on :3000
+#   analytics OPTIONAL Streamlit admin UI on :8501 (profile: streamlit)
+#
+# The schema is created by the API on startup via src.shared.db.init_all() —
+# there is no init SQL mounted here, because there is only one init path.
+
+name: automark
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: automark_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-automark}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: automark_api
+    restart: unless-stopped
+    command:
+      ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: .env
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-automark}
+      UPLOAD_DIR: /app/uploads
+      KNOWLEDGE_BASE_PATH: /app/src/crm/knowledge_base
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+      - ../src/crm/knowledge_base:/app/src/crm/knowledge_base:ro
+
+  web:
+    image: node:20-alpine
+    container_name: automark_web
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm ci && npm run build && npm start"
+    environment:
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    volumes:
+      - ../frontend:/app
+      - web_node_modules:/app/node_modules
+
+  # Optional: the original Streamlit analytics UI, kept as an internal tool.
+  # Start with:  docker compose -f docker/docker-compose.yml --profile streamlit up
+  analytics:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: automark_analytics
+    restart: unless-stopped
+    profiles: ["streamlit"]
+    command:
+      ["streamlit", "run", "src/analytics/ui/streamlit_app.py",
+       "--server.port=8501", "--server.address=0.0.0.0"]
+    env_file: .env
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-automark}
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "8501:8501"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+
+volumes:
+  postgres_data:
+  uploads:
+  web_node_modules:

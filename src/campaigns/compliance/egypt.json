@@ -1,0 +1,49 @@
+{
+  "market": "EG",
+  "special_ad_category": "HOUSING",
+  "geo_radius_km": 25,
+  "targeting_rules": {
+    "age_min": 18,
+    "age_max": 65,
+    "genders": ["all"],
+    "blocked_fields": [
+      "income_tier", "net_worth", "education_level",
+      "relationship_status", "parental_status", "ethnic_affinity",
+      "political_views", "religion"
+    ],
+    "locations_required": true,
+    "minimum_audience_size": 1000
+  },
+  "copy_violations": {
+    "preference_language": [
+      "perfect for families", "ideal for families", "family-friendly",
+      "great for singles", "for young professionals", "for seniors",
+      "no children", "adults only", "preferred neighborhood",
+      "exclusive community", "christian neighborhood", "muslim area",
+      "مناسب للعائلات", "للعائلات فقط", "للشباب فقط", "للكبار",
+      "حي هادئ لعائلات", "للمسلمين", "للمسيحيين"
+    ],
+    "personal_attribute_framing": [
+      "if you are a family", "if you have children",
+      "لو أنت متجوز", "لو عندك أطفال"
+    ]
+  },
+  "compliant_messaging": {
+    "focus_on": [
+      "property features", "amenities", "location details",
+      "price and payment plan", "investment potential",
+      "compound services", "delivery timeline"
+    ],
+    "avoid": [
+      "buyer demographics", "neighborhood character by group",
+      "family composition requirements", "personal attributes of buyer"
+    ]
+  },
+  "geo_targeting": {
+    "allowed_types": ["radius", "city", "governorate", "country"],
+    "blocked_types": ["zip_code", "postal_code", "neighborhood_name_as_demographic"],
+    "default_country": "EG",
+    "radius_default_km": 25,
+    "radius_max_km": 80
+  }
+}

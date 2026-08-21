@@ -1,18 +1,24 @@
 # AutoMark AI — Unified Requirements
-# Covers CRM (FastAPI/asyncpg) + Data Analytics Assistant (Streamlit/SQLAlchemy)
+# One application, three modules: CRM + Campaigns + Analytics
 # Python 3.12 | Install: pip install -r requirements.txt
 
-# ── Web framework (CRM) ──────────────────────────────────────────────────────
+# ── Web framework ─────────────────────────────────────────────────────────────
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+sse-starlette==2.1.3
 
-# ── UI framework (Analytics) ─────────────────────────────────────────────────
+# ── UI framework (Analytics standalone/admin Streamlit app) ──────────────────
 streamlit==1.45.1
 
-# ── Data validation ───────────────────────────────────────────────────────────
-pydantic==2.11.5
-pydantic[email]>=2.6.0
+# ── Data validation / settings ────────────────────────────────────────────────
+pydantic>=2.12.2,<3.0.0
+pydantic[email]>=2.12.2,<3.0.0
 pydantic-settings==2.9.1
+
+# ── Auth (app-wide identity) ──────────────────────────────────────────────────
+bcrypt==4.2.1
+PyJWT==2.10.1
 
 # ── Gemini / Google AI ────────────────────────────────────────────────────────
 google-generativeai==0.8.3
@@ -21,18 +27,35 @@ langchain-google-genai==2.0.7
 
 # ── LangGraph / LangChain / LangSmith ────────────────────────────────────────
 langgraph==0.3.34
+# Pinned to the 2.x line to match langgraph==0.3.34's langgraph-checkpoint
+# dependency (2.1.2) — the 3.x releases of these two packages require a
+# langgraph-checkpoint version newer than what langgraph 0.3.34 pulls in,
+# which breaks their import (see src/campaigns/pipeline_graph.py).
+langgraph-checkpoint-sqlite==2.0.11
+langgraph-checkpoint-postgres==2.0.25
 langchain-core==0.3.63
 langchain-community>=0.3.0
 langchain-text-splitters>=0.3.0
 langsmith==0.2.10
 
-# ── Database — async driver + pgvector (CRM) ─────────────────────────────────
+# ── Database — one PostgreSQL + pgvector database for every module ───────────
+# SQLAlchemy is the single ORM layer (src/shared/db.py + src/shared/models.py).
+# asyncpg drives the async engine (CRM), psycopg2 the sync one (campaigns,
+# analytics). pgvector supplies the Vector column type and HNSW index support.
+sqlalchemy[asyncio]==2.0.41
 asyncpg==0.30.0
+psycopg2-binary==2.9.10
 pgvector==0.3.6
 
-# ── Database — sync ORM (Analytics) ──────────────────────────────────────────
-sqlalchemy==2.0.41
-psycopg2-binary==2.9.10
+# ── Meta / Facebook Ads (Campaigns) ──────────────────────────────────────────
+facebook-business>=3.0.0
+
+# ── Arabic text shaping (Campaigns — RTL ad creative) ────────────────────────
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+
+# ── Optional web search (Campaigns — set ENABLE_WEB_SEARCH=true) ─────────────
+ddgs>=6.0.0
 
 # ── Data processing (Analytics) ───────────────────────────────────────────────
 pandas==2.2.3
@@ -43,18 +66,23 @@ plotly==6.1.2
 
 # ── HTTP / async utilities ────────────────────────────────────────────────────
 httpx==0.28.1
+requests>=2.32.0
 tenacity==9.0.0
 aiofiles==24.1.0
 python-dotenv==1.1.0
-python-multipart==0.0.20
 
 # ── Document parsing (CRM RAG) ────────────────────────────────────────────────
-pypdf==5.1.0
-python-docx==1.1.2
+pypdf>=6.2.0
+python-docx>=1.2.0
 pillow==11.0.0
 
 # ── Semantic reranking (CRM RAG) ──────────────────────────────────────────────
 sentence-transformers==3.3.1
 
-# ── Structured logging (CRM) ──────────────────────────────────────────────────
+# ── Structured logging ────────────────────────────────────────────────────────
 structlog==24.4.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-mock>=3.14.0

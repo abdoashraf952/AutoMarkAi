@@ -59,8 +59,8 @@ docker-compose.override.yml
 # ── Uploads / runtime data ────────────────────────────────────────────────────
 uploads/
 handoffs/
-CRM/uploads/
-Data Analytics/uploads/
+src/crm/uploads/
+src/analytics/uploads/
 
 # ── LangChain / LangGraph ─────────────────────────────────────────────────────
 langchain_cache/
@@ -71,3 +71,13 @@ logs/
 
 # ── Streamlit ─────────────────────────────────────────────────────────────────
 .streamlit/secrets.toml
+
+# ── Runtime state (unified layout) ────────────────────────────────────────────
+.client_memory/
+.agent_logs/
+output/
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+node_modules/
+.next/
+*.tsbuildinfo

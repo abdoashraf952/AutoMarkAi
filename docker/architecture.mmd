@@ -1,0 +1,55 @@
+%% AutoMark AI — Agent Architecture
+%% Render: paste into https://mermaid.live  OR  mmdc -i architecture.mmd -o architecture.png
+%% Rectangles = agents/nodes · stadiums = I/O · the cylinder = the Strategist's tools.
+
+flowchart TD
+    U([User<br/>image · budget · goal · language])
+
+    subgraph INTERVIEW["🗣️ Adaptive Interview"]
+        QG["question_gen_node<br/>Gemini Vision · next question"]
+        QA["question_ask_node<br/>⏸ human answer"]
+        QG --> QA
+        QA -. next question .-> QG
+    end
+
+    ORC["🧭 orchestrator_node<br/>Gemini Vision → campaign_plan"]
+    STR["🎯 strategy_node — Strategist<br/>Groq → persona · channels · dayparting"]
+    TOOLS[("🧰 strategy_tools<br/>dayparting KB · timezone<br/>Meta schedule · web search")]
+
+    subgraph SUBAGENTS["⚙️ Sub-agents — parallel"]
+        CRE["✍️ creative_node<br/>Groq text + Gemini image"]
+        MB["💰 media_buying_node<br/>Groq → budget · bid · audience"]
+    end
+
+    subgraph REVIEW["🧑‍⚖️ Human Review"]
+        IR["image_review_node<br/>⏸"]
+        RG["image_regen_node<br/>Gemini image"]
+        PK["image_pick_node<br/>⏸ pick"]
+        TR["text_review_node<br/>⏸ choose 1 copy + 1 headline · edit"]
+    end
+
+    MRG["🧩 merge_node<br/>validate · assemble bundle"]
+    PUB([🚀 Publish to Meta])
+
+    U --> QG
+    QA -- all answered --> ORC --> STR
+    STR -. uses .-> TOOLS
+    STR --> CRE
+    STR --> MB
+    CRE --> IR
+    IR -- regenerate --> RG --> IR
+    IR -- limit / see all --> PK --> TR
+    IR -- approve --> TR
+    TR --> MRG
+    MB --> MRG
+    MRG --> PUB
+
+    classDef agent fill:#1e293b,stroke:#7c3aed,color:#fff;
+    classDef human fill:#0f172a,stroke:#22d3ee,color:#fff;
+    classDef io fill:#312e81,stroke:#a78bfa,color:#fff;
+    classDef tools fill:#0b3b2e,stroke:#34d399,color:#fff;
+
+    class QG,ORC,STR,CRE,MB,RG,MRG agent;
+    class QA,IR,PK,TR human;
+    class U,PUB io;
+    class TOOLS tools;

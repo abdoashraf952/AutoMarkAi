@@ -1,0 +1,303 @@
+// ------------------------------------------------------------------ //
+// Thin typed client over the AutoMark AI FastAPI backend (api.py).    //
+// Every call returns parsed JSON or throws an ApiError.               //
+// ------------------------------------------------------------------ //
+
+import type {
+  ApprovalMode,
+  AssetType,
+  CampaignBundle,
+  CampaignReport,
+  ClientMemory,
+  ImagesResponse,
+  PhotoSelectBody,
+  PublishBody,
+  PublishResponse,
+  ResultResponse,
+  SessionResponse,
+  SetupData,
+  StageResponse,
+  TextDecisionBody,
+} from "./types";
+
+export type { CampaignBundle } from "./types";
+
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8000";
+
+// The backend is one app with three mounted modules; each has its own prefix.
+export const AUTH_API      = `${API_BASE}/api/auth`;
+export const CAMPAIGN_API  = `${API_BASE}/api/campaigns`;
+export const ANALYTICS_API = `${API_BASE}/api/analytics`;
+
+/** Authorization header for the stored JWT — shared by every module's client. */
+export function authHeader(): HeadersInit {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem("automark_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/** The raw JWT, for EventSource URLs which cannot carry headers. */
+export function authToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("automark_token");
+}
+
+/** Read the stored JWT from localStorage and return an Authorization header object. */
+function _authHeader(): HeadersInit {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem("automark_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function parse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      detail = body?.detail || JSON.stringify(body);
+    } catch {
+      /* non-json error body */
+    }
+    throw new ApiError(detail, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+export async function createSession(): Promise<SessionResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session`, {
+    method:  "POST",
+    headers: _authHeader(),   // attach token so the backend links session to user
+  });
+  return parse<SessionResponse>(res);
+}
+
+/** Upload a client asset (logo, brochure, floor plans, …) before starting. */
+export async function uploadAsset(
+  sessionId: string,
+  assetType: AssetType,
+  file: File
+): Promise<{ ok: boolean; asset_type: string; filename: string }> {
+  const form = new FormData();
+  form.append("asset_type", assetType);
+  form.append("file", file, file.name);
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/upload-asset`, {
+    method: "POST",
+    body: form,
+  });
+  return parse(res);
+}
+
+/** Set the approval mode (and optionally feature flags) for the session.
+ *  Call before /start, or at any time to adjust the mode mid-campaign. */
+export async function setMode(
+  sessionId: string,
+  approvalMode: ApprovalMode,
+  featureFlags: Record<string, boolean> = {}
+): Promise<{ ok: boolean; approval_mode: string; feature_flags: Record<string, boolean> }> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approval_mode: approvalMode, feature_flags: featureFlags }),
+  });
+  return parse(res);
+}
+
+/** Starts the pipeline with the uploaded unit photos — blocks until the first
+ *  interrupt. In 'guided' or 'autopilot' mode the first interrupt may be
+ *  'questions' (campaign target is auto-picked), not 'campaign_target'. */
+export async function startSession(
+  sessionId: string,
+  setup: SetupData
+): Promise<StageResponse> {
+  const form = new FormData();
+  form.append("budget", String(setup.budget));
+  form.append("language", setup.language);
+  form.append("approval_mode", setup.approvalMode ?? "full_manual");
+  for (const file of setup.imageFiles) {
+    form.append("images", file, file.name);
+  }
+
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/start`, {
+    method: "POST",
+    body: form,
+  });
+  return parse<StageResponse>(res);
+}
+
+/** Answer the current adaptive question; the response carries the next question
+ *  (stage "questions") or the next stage when the interview is done. */
+export async function submitAnswer(
+  sessionId: string,
+  answer: string
+): Promise<StageResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer }),
+  });
+  return parse<StageResponse>(res);
+}
+
+/** Choose which uploaded photos to use in the ad (photo_select interrupt). */
+export async function selectPhotos(
+  sessionId: string,
+  selectedIndices: number[]
+): Promise<StageResponse> {
+  const body: PhotoSelectBody = { selected_indices: selectedIndices };
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/select-photos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parse<StageResponse>(res);
+}
+
+export async function textDecision(
+  sessionId: string,
+  body: TextDecisionBody
+): Promise<StageResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/text-decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parse<StageResponse>(res);
+}
+
+export async function getImages(sessionId: string): Promise<ImagesResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/images`);
+  return parse<ImagesResponse>(res);
+}
+
+export async function publish(
+  sessionId: string,
+  body: PublishBody = { make_sponsored_ad: true, make_organic_post: true }
+): Promise<PublishResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return parse<PublishResponse>(res);
+}
+
+export async function getResult(sessionId: string): Promise<ResultResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/result`);
+  return parse<ResultResponse>(res);
+}
+
+// ---- Phase 4: Operate loop ---------------------------------------- //
+
+/** Get the latest campaign diagnosis + decisions log. */
+export async function getReport(sessionId: string): Promise<CampaignReport> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/report`);
+  return parse<CampaignReport>(res);
+}
+
+/** Resolve an Approval Gateway interrupt (stage == 'approval'). */
+export async function resolveApproval(
+  sessionId: string,
+  decision: "approved" | "rejected",
+  feedback = ""
+): Promise<StageResponse> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/approval`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision, feedback }),
+  });
+  return parse<StageResponse>(res);
+}
+
+/** Manually trigger an immediate operate cycle (diagnosis → decision → act). */
+export async function triggerOperate(
+  sessionId: string
+): Promise<{ ok: boolean; session_id: string }> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/operate`, {
+    method: "POST",
+  });
+  return parse(res);
+}
+
+// ---- Phase 5: Memory ---------------------------------------------- //
+
+/** Get long-term client memory for a session. */
+export async function getMemory(sessionId: string): Promise<{ session_id: string; client_ref: string | null; memory: ClientMemory | Record<string, never> }> {
+  const res = await fetch(`${CAMPAIGN_API}/session/${sessionId}/memory`);
+  return parse(res);
+}
+
+/** Convenience: build an <img>-ready data URL from a raw base64 string. */
+export function toDataUrl(base64: string, mime = "image/png"): string {
+  if (!base64) return "";
+  if (base64.startsWith("data:")) return base64;
+  return `data:${mime};base64,${base64}`;
+}
+
+// ---- Auth ----------------------------------------------------------------- //
+
+export interface AuthResponse {
+  token:   string;
+  user_id: string;
+  email:   string;
+}
+
+export async function authRegister(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${AUTH_API}/register`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ email, password }),
+  });
+  return parse<AuthResponse>(res);
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${AUTH_API}/login`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ email, password }),
+  });
+  return parse<AuthResponse>(res);
+}
+
+// ---- Campaign records ----------------------------------------------------- //
+
+export interface CampaignRecord {
+  id:               string;
+  thread_id:        string;
+  compound_name:    string | null;
+  status:           "draft" | "published";
+  budget:           number | null;
+  language:         string | null;
+  meta_campaign_id: string | null;
+  meta_adset_id:    string | null;
+  meta_creative_id: string | null;
+  meta_ad_id:       string | null;
+  meta_post_id:     string | null;
+  campaign_bundle:  CampaignBundle | null;
+  created_at:       string;
+  published_at:     string | null;
+}
+
+export async function listMyCampaigns(): Promise<CampaignRecord[]> {
+  const res = await fetch(`${CAMPAIGN_API}/users/me/campaigns`, {
+    headers: _authHeader(),
+  });
+  return parse<CampaignRecord[]>(res);
+}
+
+export async function getMyCampaign(campaignId: string): Promise<CampaignRecord> {
+  const res = await fetch(`${CAMPAIGN_API}/users/me/campaigns/${campaignId}`, {
+    headers: _authHeader(),
+  });
+  return parse<CampaignRecord>(res);
+}
